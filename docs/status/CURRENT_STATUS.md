@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.0.3`
+`v0.0.4`
 
 ## Truthful implementation state
 
@@ -18,12 +18,15 @@ AstraVCS is at semantic-reference-model bootstrap. The production VCS does not y
 - Executable Python invariant suite.
 - Shared bootstrap canonical identity specification and golden vectors for Python/Rust compatibility.
 - Cross-language TreeID encoding aligned and ConflictID affected-node ordering canonicalized.
+- Strict bootstrap ObjectEnvelope framing implemented in Python and mirrored in Rust.
+- Semantic validation implemented for bootstrap paths, identifiers, nodes, Trees, Revisions, RepositoryViews, Operations, and Conflicts.
+- Compare-and-swap repository operation-head publication and divergent-operation recording implemented in the reference model and mirrored in Rust.
 
 ## Validation completed in the current environment
 
-- Python semantic tests: 11/11 passing with warnings promoted to errors.
+- Python reference, codec, and validation tests: 29/29 passing with warnings promoted to errors.
 - Python syntax compilation: passing with warnings promoted to errors.
-- Checked-in canonical vectors reproduce byte-for-byte from the Python reference generator.
+- Checked-in canonical identity and codec vectors reproduce byte-for-byte from the Python reference generators.
 - Git repository clean after milestone commit when this status was prepared.
 
 ## Validation not available here
@@ -36,4 +39,4 @@ The recovered repository currently has only the local historical bundle as a rec
 
 ## Next implementation target
 
-`v0.0.4`: define and implement the canonical object-codec boundary, add strict identifier/object validation and malformed-input coverage, and strengthen repository-history/concurrency semantics before durable loose-object storage begins.
+`v0.0.5`: implement the first durable loose-object content-addressed store against the validated bootstrap envelope, including atomic write/publication, verification, quarantine behavior, corruption detection, and store-level fault tests. Automatic reconciliation of divergent operation heads remains separately tracked and must not be invented implicitly.

@@ -23,7 +23,7 @@ A test that cannot be run due to environment/toolchain limitations is reported a
 |---|---|---|
 | Python semantic oracle | unittest with warnings as errors | Available |
 | Python syntax | `py_compile` with warnings as errors | Available |
-| Golden vectors | byte-for-byte regeneration comparison | Available |
+| Golden identity + codec vectors | byte-for-byte regeneration comparison | Available |
 | Rust semantic model | `cargo test` | Blocked: Rust toolchain unavailable |
 | Rust lint | `cargo clippy -- -D warnings` | Blocked: Rust toolchain unavailable |
 | Rust format | `cargo fmt -- --check` | Blocked: Rust toolchain unavailable |

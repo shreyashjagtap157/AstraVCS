@@ -4,7 +4,7 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.0.3` — cross-language semantic canonicalization milestone.
+`v0.0.4` — strict codec, semantic validation, and concurrent operation-head safety milestone.
 
 The repository currently contains:
 
@@ -14,6 +14,8 @@ The repository currently contains:
 - the initial Rust `astra-model` crate mirroring the reference semantics;
 - invariant tests for revision/change/node/operation behavior;
 - shared canonical identity vectors consumed by the Python and Rust models;
+- strict bootstrap object envelope and malformed-input rejection;
+- centralized semantic validation and stale operation-head detection;
 - documented compatibility/validation cycle for all future changes.
 
 No production VCS functionality is claimed yet.

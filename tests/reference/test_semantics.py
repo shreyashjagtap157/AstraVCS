@@ -76,8 +76,8 @@ class SemanticModelTests(unittest.TestCase):
         rev_b = digest(b"TEST", b"rev-b")
         view_a = RepositoryView.create({b"main": rev_a})
         view_b = RepositoryView.create({b"main": rev_b})
-        first = history.publish(view_a, b"publish a")
-        second = history.publish(view_b, b"publish b")
+        first = history.publish(view_a, b"publish a", expected_head=None)
+        second = history.publish(view_b, b"publish b", expected_head=first)
         self.assertNotEqual(first, second)
         self.assertEqual(history.current_view, view_b)
         history.undo()
@@ -93,11 +93,10 @@ class SemanticModelTests(unittest.TestCase):
         self.assertEqual(a.conflict_id, b.conflict_id)
 
     def test_unsupported_node_kind_is_rejected(self):
-        tree = Tree.from_dict({
-            b"device": NodeEntry("00" * 16, "device", None),
-        })
         with self.assertRaisesRegex(ValueError, "unsupported node kind"):
-            _ = tree.tree_id
+            Tree.from_dict({
+                b"device": NodeEntry("00" * 16, "device", None),
+            })
 
     def test_checked_in_canonical_vectors_match_reference_model(self):
         checked_in = (ROOT / "tests" / "vectors" / "bootstrap-v0.tsv").read_text(encoding="utf-8")

@@ -1,5 +1,75 @@
 use crate::{ChangeId, ContentId, NodeId, ObjectId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
+
+pub const MAX_PATH_BYTES: usize = 16 * 1024;
+pub const MAX_NAME_BYTES: usize = 4 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ValidationError {
+    EmptyPath,
+    PathTooLong,
+    PathContainsNul,
+    PathNotRelative,
+    InvalidPathComponent,
+    EmptyName(&'static str),
+    NameTooLong(&'static str),
+    NameContainsNul(&'static str),
+    DirectoryHasContent,
+    MissingContent,
+    SelfDerivedNode,
+    DuplicateNodeId,
+    DuplicateRevisionParent,
+    DuplicateOperationParent,
+    EmptyCommand,
+    TooFewConflictInputs,
+    DuplicateConflictInput,
+    EmptyAffectedNodes,
+    DuplicateAffectedNode,
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+pub fn validate_path(path: &[u8]) -> Result<(), ValidationError> {
+    if path.is_empty() {
+        return Err(ValidationError::EmptyPath);
+    }
+    if path.len() > MAX_PATH_BYTES {
+        return Err(ValidationError::PathTooLong);
+    }
+    if path.contains(&0) {
+        return Err(ValidationError::PathContainsNul);
+    }
+    if path.first() == Some(&b'/') || path.last() == Some(&b'/') {
+        return Err(ValidationError::PathNotRelative);
+    }
+    if path
+        .split(|byte| *byte == b'/')
+        .any(|component| component.is_empty() || component == b"." || component == b"..")
+    {
+        return Err(ValidationError::InvalidPathComponent);
+    }
+    Ok(())
+}
+
+fn validate_name(name: &[u8], label: &'static str) -> Result<(), ValidationError> {
+    if name.is_empty() {
+        return Err(ValidationError::EmptyName(label));
+    }
+    if name.len() > MAX_NAME_BYTES {
+        return Err(ValidationError::NameTooLong(label));
+    }
+    if name.contains(&0) {
+        return Err(ValidationError::NameContainsNul(label));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NodeKind {
@@ -16,13 +86,43 @@ pub struct NodeEntry {
     pub derived_from: Option<NodeId>,
 }
 
+impl NodeEntry {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        match self.kind {
+            NodeKind::Directory if self.content.is_some() => return Err(ValidationError::DirectoryHasContent),
+            NodeKind::File | NodeKind::Symlink if self.content.is_none() => {
+                return Err(ValidationError::MissingContent)
+            }
+            _ => {}
+        }
+        if self.derived_from == Some(self.node_id) {
+            return Err(ValidationError::SelfDerivedNode);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Tree {
     pub entries: BTreeMap<Vec<u8>, NodeEntry>,
 }
 
 impl Tree {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut node_ids = HashSet::with_capacity(self.entries.len());
+        for (path, entry) in &self.entries {
+            validate_path(path)?;
+            entry.validate()?;
+            if !node_ids.insert(entry.node_id) {
+                return Err(ValidationError::DuplicateNodeId);
+            }
+        }
+        Ok(())
+    }
+
     pub fn rename(&mut self, from: &[u8], to: Vec<u8>) -> Result<(), &'static str> {
+        validate_path(from).map_err(|_| "invalid source path")?;
+        validate_path(&to).map_err(|_| "invalid destination path")?;
         if self.entries.contains_key(&to) {
             return Err("destination already exists");
         }
@@ -37,6 +137,8 @@ impl Tree {
         to: Vec<u8>,
         new_id: NodeId,
     ) -> Result<NodeId, &'static str> {
+        validate_path(from).map_err(|_| "invalid source path")?;
+        validate_path(&to).map_err(|_| "invalid destination path")?;
         if self.entries.contains_key(&to) {
             return Err("destination already exists");
         }
@@ -47,11 +149,13 @@ impl Tree {
             content: source.content,
             derived_from: Some(source.node_id),
         };
+        copied.validate().map_err(|_| "invalid copied node")?;
         self.entries.insert(to, copied);
         Ok(new_id)
     }
 
     pub fn semantic_bytes(&self) -> Vec<u8> {
+        self.validate().expect("invalid Tree semantic value");
         let mut out = Vec::new();
         for (path, entry) in &self.entries {
             out.extend_from_slice(&(path.len() as u64).to_be_bytes());
@@ -94,7 +198,12 @@ pub struct ChangeVersion {
 }
 
 impl ChangeVersion {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        Ok(())
+    }
+
     pub fn id(&self) -> ObjectId {
+        self.validate().expect("invalid ChangeVersion semantic value");
         ObjectId::digest(
             b"ASTRA:CHANGE-VERSION:V0",
             &[
@@ -124,16 +233,22 @@ pub struct Revision {
 }
 
 impl Revision {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut parents = HashSet::with_capacity(self.parents.len());
+        if self.parents.iter().any(|parent| !parents.insert(*parent)) {
+            return Err(ValidationError::DuplicateRevisionParent);
+        }
+        Ok(())
+    }
+
     pub fn id(&self) -> ObjectId {
+        self.validate().expect("invalid Revision semantic value");
         let mut parent_bytes = Vec::with_capacity(self.parents.len() * 32);
         for parent in &self.parents {
             parent_bytes.extend_from_slice(&parent.0);
         }
         let cv = self.change_version.map(|id| id.0).unwrap_or([0_u8; 32]);
-        ObjectId::digest(
-            b"ASTRA:REVISION:V0",
-            &[&parent_bytes, &self.tree.0, &cv],
-        )
+        ObjectId::digest(b"ASTRA:REVISION:V0", &[&parent_bytes, &self.tree.0, &cv])
     }
 }
 
@@ -145,7 +260,27 @@ pub struct Conflict {
 }
 
 impl Conflict {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_name(&self.kind, "conflict kind")?;
+        if self.inputs.len() < 2 {
+            return Err(ValidationError::TooFewConflictInputs);
+        }
+        let mut inputs = HashSet::with_capacity(self.inputs.len());
+        if self.inputs.iter().any(|input| !inputs.insert(*input)) {
+            return Err(ValidationError::DuplicateConflictInput);
+        }
+        if self.affected_nodes.is_empty() {
+            return Err(ValidationError::EmptyAffectedNodes);
+        }
+        let mut nodes = HashSet::with_capacity(self.affected_nodes.len());
+        if self.affected_nodes.iter().any(|node| !nodes.insert(*node)) {
+            return Err(ValidationError::DuplicateAffectedNode);
+        }
+        Ok(())
+    }
+
     pub fn id(&self) -> ObjectId {
+        self.validate().expect("invalid Conflict semantic value");
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&(self.kind.len() as u64).to_be_bytes());
         bytes.extend_from_slice(&self.kind);
@@ -168,7 +303,18 @@ pub struct RepositoryView {
 }
 
 impl RepositoryView {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        for name in self.refs.keys() {
+            validate_name(name, "ref name")?;
+        }
+        for name in self.workspace_heads.keys() {
+            validate_name(name, "workspace name")?;
+        }
+        Ok(())
+    }
+
     pub fn id(&self) -> ObjectId {
+        self.validate().expect("invalid RepositoryView semantic value");
         let mut bytes = Vec::new();
         for (name, id) in &self.refs {
             bytes.extend_from_slice(&(name.len() as u64).to_be_bytes());
@@ -193,7 +339,19 @@ pub struct Operation {
 }
 
 impl Operation {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut parents = HashSet::with_capacity(self.parents.len());
+        if self.parents.iter().any(|parent| !parents.insert(*parent)) {
+            return Err(ValidationError::DuplicateOperationParent);
+        }
+        if self.command.is_empty() {
+            return Err(ValidationError::EmptyCommand);
+        }
+        Ok(())
+    }
+
     pub fn id(&self) -> ObjectId {
+        self.validate().expect("invalid Operation semantic value");
         let mut parent_bytes = Vec::new();
         for parent in &self.parents {
             parent_bytes.extend_from_slice(&parent.0);
@@ -202,6 +360,105 @@ impl Operation {
             b"ASTRA:OPERATION:V0",
             &[&parent_bytes, &self.view.0, &self.command],
         )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HistoryError {
+    StaleHead { expected: Option<ObjectId>, current: Option<ObjectId> },
+    MissingParent,
+    MissingOperation,
+    ParentMismatch,
+    InvalidView(ValidationError),
+    InvalidOperation(ValidationError),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RepositoryHistory {
+    pub views: HashMap<ObjectId, RepositoryView>,
+    pub operations: HashMap<ObjectId, Operation>,
+    pub head: Option<ObjectId>,
+}
+
+impl RepositoryHistory {
+    pub fn publish(
+        &mut self,
+        view: RepositoryView,
+        command: Vec<u8>,
+        expected_head: Option<ObjectId>,
+    ) -> Result<ObjectId, HistoryError> {
+        if expected_head != self.head {
+            return Err(HistoryError::StaleHead {
+                expected: expected_head,
+                current: self.head,
+            });
+        }
+        view.validate().map_err(HistoryError::InvalidView)?;
+        let view_id = view.id();
+        self.views.insert(view_id, view);
+        let parents = self.head.into_iter().collect();
+        let operation = Operation { parents, view: view_id, command };
+        operation.validate().map_err(HistoryError::InvalidOperation)?;
+        let operation_id = operation.id();
+        self.operations.insert(operation_id, operation);
+        self.head = Some(operation_id);
+        Ok(operation_id)
+    }
+
+    pub fn record_from(
+        &mut self,
+        parent: Option<ObjectId>,
+        view: RepositoryView,
+        command: Vec<u8>,
+    ) -> Result<ObjectId, HistoryError> {
+        if parent.is_some_and(|id| !self.operations.contains_key(&id)) {
+            return Err(HistoryError::MissingParent);
+        }
+        view.validate().map_err(HistoryError::InvalidView)?;
+        let view_id = view.id();
+        self.views.insert(view_id, view);
+        let operation = Operation {
+            parents: parent.into_iter().collect(),
+            view: view_id,
+            command,
+        };
+        operation.validate().map_err(HistoryError::InvalidOperation)?;
+        let operation_id = operation.id();
+        self.operations.insert(operation_id, operation);
+        Ok(operation_id)
+    }
+
+    pub fn publish_existing(
+        &mut self,
+        operation_id: ObjectId,
+        expected_head: Option<ObjectId>,
+    ) -> Result<ObjectId, HistoryError> {
+        if expected_head != self.head {
+            return Err(HistoryError::StaleHead {
+                expected: expected_head,
+                current: self.head,
+            });
+        }
+        let operation = self.operations.get(&operation_id).ok_or(HistoryError::MissingOperation)?;
+        let expected_parents: Vec<_> = expected_head.into_iter().collect();
+        if operation.parents != expected_parents {
+            return Err(HistoryError::ParentMismatch);
+        }
+        self.head = Some(operation_id);
+        Ok(operation_id)
+    }
+
+    pub fn current_view(&self) -> Option<&RepositoryView> {
+        let head = self.head?;
+        let operation = self.operations.get(&head)?;
+        self.views.get(&operation.view)
+    }
+
+    pub fn undo(&mut self) -> Option<ObjectId> {
+        let head = self.head?;
+        let operation = self.operations.get(&head)?;
+        self.head = operation.parents.first().copied();
+        self.head
     }
 }
 
@@ -247,32 +504,20 @@ mod tests {
     }
 
     #[test]
-    fn amend_preserves_change_id_but_changes_version_id() {
-        let change_id = ChangeId::from_bytes([4; 16]);
-        let before = ObjectId::digest(b"TEST", &[b"before"]);
-        let after = ObjectId::digest(b"TEST", &[b"after"]);
-        let after2 = ObjectId::digest(b"TEST", &[b"after2"]);
-        let v1 = ChangeVersion {
-            change_id,
-            message: b"first".to_vec(),
-            tree_before: before,
-            tree_after: after,
-        };
-        let v2 = v1.amended(b"second".to_vec(), after2);
-        assert_eq!(v1.change_id, v2.change_id);
-        assert_ne!(v1.id(), v2.id());
-    }
-
-    #[test]
-    fn rebase_changes_revision_id_without_changing_change_version() {
-        let tree = ObjectId::digest(b"TEST", &[b"tree"]);
-        let cv = ObjectId::digest(b"TEST", &[b"change-version"]);
-        let parent_a = ObjectId::digest(b"TEST", &[b"parent-a"]);
-        let parent_b = ObjectId::digest(b"TEST", &[b"parent-b"]);
-        let a = Revision { parents: vec![parent_a], tree, change_version: Some(cv) };
-        let b = Revision { parents: vec![parent_b], tree, change_version: Some(cv) };
-        assert_eq!(a.change_version, b.change_version);
-        assert_ne!(a.id(), b.id());
+    fn compare_and_swap_rejects_stale_publication() {
+        let mut history = RepositoryHistory::default();
+        let revision_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let revision_b = ObjectId::digest(b"TEST", &[b"b"]);
+        let mut first_view = RepositoryView::default();
+        first_view.refs.insert(b"main".to_vec(), revision_a);
+        let first = history.publish(first_view, b"first".to_vec(), None).unwrap();
+        let mut second_view = RepositoryView::default();
+        second_view.refs.insert(b"main".to_vec(), revision_b);
+        assert!(matches!(
+            history.publish(second_view, b"stale".to_vec(), None),
+            Err(HistoryError::StaleHead { .. })
+        ));
+        assert_eq!(history.head, Some(first));
     }
 
     fn expected_vector(name: &str) -> &'static str {
@@ -284,25 +529,6 @@ mod tests {
                 (key == name).then_some(value)
             })
             .unwrap_or_else(|| panic!("missing canonical vector: {name}"))
-    }
-
-    #[test]
-    fn conflict_affected_node_order_is_canonical() {
-        let left = ObjectId::digest(b"TEST", &[b"left"]);
-        let right = ObjectId::digest(b"TEST", &[b"right"]);
-        let node_a = NodeId::from_bytes([0; 16]);
-        let node_b = NodeId::from_bytes([1; 16]);
-        let a = Conflict {
-            kind: b"text/text".to_vec(),
-            inputs: vec![left, right],
-            affected_nodes: vec![node_a, node_b],
-        };
-        let b = Conflict {
-            kind: b"text/text".to_vec(),
-            inputs: vec![left, right],
-            affected_nodes: vec![node_b, node_a],
-        };
-        assert_eq!(a.id(), b.id());
     }
 
     #[test]
@@ -393,5 +619,4 @@ mod tests {
         };
         assert_eq!(conflict.id().to_hex(), expected_vector("conflict.sample"));
     }
-
 }

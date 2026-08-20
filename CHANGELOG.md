@@ -4,7 +4,28 @@ All notable project changes are recorded here.
 
 ## [Unreleased]
 
-No unreleased changes after the `v0.0.3` milestone.
+No unreleased changes after the `v0.0.4` milestone.
+
+## [0.0.4] - 2026-08-20
+
+### Added
+- Strict bootstrap object-envelope codec with type/version framing, payload limits, and fail-closed malformed-input handling in Python and Rust models.
+- Shared `codec-v0.tsv` cross-language compatibility vectors.
+- Bootstrap semantic validation for identifiers, raw relative paths, node/content rules, Tree NodeID uniqueness, parent uniqueness, repository-view names, operations, and conflicts.
+- Compare-and-swap operation-head publication with explicit stale-writer detection.
+- Divergent operation recording without implicit last-writer-wins publication.
+- Codec, validation, concurrency, and adversarial malformed-input tests plus normative bootstrap specifications and ADR.
+
+### Changed
+- Invalid Trees and related semantic objects now fail earlier at construction/validation boundaries rather than only during identity calculation.
+- `astra-model` crate version advanced to `0.0.4` to match the project semantic milestone.
+
+### Validation
+- Python reference/codec/validation suite: 29/29 passing with warnings treated as errors.
+- Python syntax compilation: passing with warnings treated as errors.
+- Checked-in canonical identity and codec vectors reproduce byte-for-byte.
+- `git diff --check`: passing.
+- Rust tests/clippy/format remain unexecuted because the current environment has no Rust toolchain; they are not claimed as passing.
 
 ## [0.0.3] - 2026-08-20
 
