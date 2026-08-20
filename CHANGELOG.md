@@ -4,7 +4,36 @@ All notable project changes are recorded here.
 
 ## [Unreleased]
 
-No unreleased changes after the `v0.0.5` milestone.
+No unreleased changes after the `v0.0.6` milestone.
+
+## [0.0.6] - 2026-08-20
+
+### Added
+- Canonical bootstrap semantic-object serialization/deserialization for all currently modeled semantic object classes.
+- Shared `semantic-codec-v0.tsv` vectors containing semantic IDs, complete ObjectEnvelope bytes, and StoreKeys for Python/Rust compatibility.
+- New Rust `astra-repository` crate mirroring repository initialization, semantic mapping, lookup, fsck, and orphan recovery semantics.
+- Bootstrap `.astra` repository layout and durable format marker.
+- Immutable semantic-ID-to-StoreKey mapping layer that keeps physical loose-store identity separate from repository meaning.
+- Repository-level `fsck` validating mapping syntax, physical object integrity, object type, canonical semantic decoding, recomputed semantic identity, and orphan physical objects.
+- Safe recovery of healthy canonical orphan objects left by interruption after store publication and before semantic mapping publication.
+- Normative bootstrap semantic-serialization/repository-layout specifications and ADR 0006.
+
+### Fixed / hardened
+- Canonicalized Conflict `affected_nodes` during semantic serialization so a set-equivalent ConflictID cannot map to multiple persisted byte representations.
+- Applied durable parent-directory fsync discipline to semantic mapping directory creation instead of relying on ordinary recursive mkdir behavior.
+
+### Compatibility / limitations
+- Semantic serialization and repository layout remain explicitly bootstrap-v0 formats and may be migrated before Repository Format 1 freeze.
+- StoreKey remains a physical implementation detail; semantic IDs remain repository authority.
+- Healthy orphan store objects are reported but do not make `fsck.ok` false because they can be safe interruption residue.
+- Rust Windows directory-fsync durability remains unimplemented/unclaimed.
+
+### Validation
+- Full executable Python suite: 61/61 passing with warnings treated as errors.
+- Python syntax compilation and identity/codec/store/semantic-vector checks pass.
+- Cargo TOML manifests parse successfully.
+- Repository persistence stress pass: 30 rounds × 32 concurrent semantic writers converged without mapping/store divergence.
+- Rust tests/clippy/format remain unexecuted because the current environment has no Rust toolchain; they are not claimed as passing.
 
 ## [0.0.5] - 2026-08-20
 

@@ -1,0 +1,11 @@
+[package]
+name = "astra-repository"
+version = "0.0.6"
+edition = "2021"
+publish = false
+license = "UNLICENSED"
+description = "Bootstrap repository persistence integrating AstraVCS semantic objects with the loose CAS"
+
+[dependencies]
+astra-model = { path = "../astra-model" }
+astra-store = { path = "../astra-store" }

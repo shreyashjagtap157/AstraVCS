@@ -2,11 +2,11 @@
 
 ## Version
 
-`v0.0.5`
+`v0.0.6`
 
 ## Truthful implementation state
 
-AstraVCS remains in semantic/bootstrap-storage implementation. It is not yet a usable production VCS.
+AstraVCS remains in semantic/bootstrap-repository implementation. It is not yet a usable production VCS.
 
 ## Implemented in this repository
 
@@ -27,14 +27,21 @@ AstraVCS remains in semantic/bootstrap-storage implementation. It is not yet a u
 - Idempotent duplicate writes with winner verification.
 - Corrupt-object detection, quarantine, repair-on-put, scrub, and temporary-residue cleanup.
 - Concurrent duplicate writer convergence tests and pre/post-publication fault tests.
+- Canonical bootstrap semantic serialization/deserialization for Content, Tree, ChangeVersion, Revision, RepositoryView, Operation, and Conflict.
+- Shared semantic serialization vectors containing semantic IDs, full envelopes, and StoreKeys.
+- `.astra` repository initialization with durable bootstrap format marker and semantic mapping layer.
+- Semantic-object put/get through semantic IDs while retaining StoreKey as a physical implementation detail.
+- Repository-level `fsck` covering mappings, physical objects, object types, canonical decoding, recomputed semantic identity, and orphan objects.
+- Safe recovery of healthy orphan store objects left by interruption between CAS publication and semantic mapping publication.
 
 ## Validation completed in the current environment
 
-- Python reference/codec/validation/store suite: 43/43 passing with warnings promoted to errors.
+- Python reference/codec/validation/store/repository suite: 61/61 passing with warnings promoted to errors.
 - Python syntax compilation passes.
-- Checked-in identity, codec, and store vectors reproduce byte-for-byte from Python generators.
+- Checked-in identity, codec, store, and semantic-serialization vectors reproduce byte-for-byte from Python generators.
 - Git whitespace/diff validation passes.
 - Additional storage stress pass: 40 rounds × 24 concurrent writers, each followed by corruption, scrub/quarantine, republish, and read-back verification.
+- Repository persistence stress pass: 30 rounds × 32 concurrent semantic writers, each converging to one semantic ID, one StoreKey, one healthy mapping, and zero orphan objects.
 
 ## Validation not available here
 
@@ -48,4 +55,4 @@ The repository is reconstructed from the latest milestone bundle when persistent
 
 ## Next implementation target
 
-After `v0.0.5` is committed and verified, `v0.0.6` should integrate canonical semantic-object serialization with the store, add repository initialization/layout and object lookup by semantic identity mapping, and begin repository-level fsck/recovery without prematurely adding packed storage.
+After `v0.0.6` is committed and verified, `v0.0.7` should persist repository operation/view heads transactionally on top of the semantic repository layer, add durable ref/workspace-head state and startup recovery, and begin a minimal local repository API suitable for the first CLI without introducing packed storage or network synchronization prematurely.

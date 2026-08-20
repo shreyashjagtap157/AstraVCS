@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "crates/astra-model",
     "crates/astra-store",
+    "crates/astra-repository",
 ]

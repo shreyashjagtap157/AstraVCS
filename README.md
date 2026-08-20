@@ -4,7 +4,7 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.0.5` — first durable bootstrap loose-object CAS milestone.
+`v0.0.6` — canonical semantic persistence and repository-integrity milestone.
 
 The repository currently contains:
 
@@ -17,7 +17,9 @@ The repository currently contains:
 - strict bootstrap object envelope and malformed-input rejection;
 - centralized semantic validation and stale operation-head detection;
 - first durable bootstrap loose-object CAS with corruption quarantine, scrub, and idempotent concurrent publication;
-- shared StoreKey compatibility vectors for Python/Rust implementations;
+- shared StoreKey and semantic-serialization compatibility vectors for Python/Rust implementations;
+- bootstrap `.astra` repository initialization and semantic-ID-to-StoreKey mapping;
+- repository-level `fsck` plus safe orphan-mapping recovery;
 - documented compatibility/validation cycle for all future changes.
 
 No production VCS functionality is claimed yet.
@@ -30,6 +32,6 @@ Git is the bootstrap VCS. AstraVCS will not become self-hosting until repository
 
 Repository meaning is stable; storage, indexes, transports, UI frameworks, AI models, plugin runtimes, and server topology are replaceable implementation details.
 
-## Current storage milestone
+## Current persistence milestone
 
-`v0.0.5` adds the first bootstrap durable loose-object CAS. Physical `StoreKey` is deliberately distinct from semantic repository identities so later packed/segment storage or canonical-format changes can be introduced through verified migrations without redefining repository meaning.
+`v0.0.6` layers canonical bootstrap semantic serialization and repository persistence over the `v0.0.5` loose CAS. Semantic repository identities remain distinct from physical `StoreKey`; `.astra/semantic-map` connects the two, `fsck` verifies both layers, and safe orphan recovery handles interruption after CAS publication but before mapping publication. Packed/segment storage remains intentionally deferred until these semantics are stable.
