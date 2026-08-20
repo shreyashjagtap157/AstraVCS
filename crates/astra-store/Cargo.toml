@@ -1,0 +1,10 @@
+[package]
+name = "astra-store"
+version = "0.0.5"
+edition = "2021"
+publish = false
+license = "UNLICENSED"
+description = "Bootstrap durable loose-object store for AstraVCS"
+
+[dependencies]
+astra-model = { path = "../astra-model" }

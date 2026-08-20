@@ -4,7 +4,33 @@ All notable project changes are recorded here.
 
 ## [Unreleased]
 
-No unreleased changes after the `v0.0.4` milestone.
+No unreleased changes after the `v0.0.5` milestone.
+
+## [0.0.5] - 2026-08-20
+
+### Added
+- First durable bootstrap loose-object content-addressed store in the executable Python reference implementation.
+- Dedicated Rust `astra-store` crate mirroring loose-store keying, publication, verification, scrub, quarantine, and idempotency semantics.
+- Domain-separated bootstrap `StoreKey`, explicitly separated from semantic repository identities.
+- Same-filesystem write/fsync/hard-link publication path that never intentionally overwrites an existing canonical object.
+- Corruption detection, quarantine, repair-on-put, object scrub, and temporary-residue cleanup.
+- Shared `store-v0.tsv` StoreKey vectors for Python/Rust compatibility.
+- Concurrent duplicate-writer convergence test and pre/post-publication fault tests.
+- Loose-store normative specification and ADR documenting bootstrap constraints and replacement policy.
+
+### Fixed
+- Removed a temp-name selection race in the Python reference store by combining unpredictable temp names with exclusive file creation.
+
+### Compatibility / limitations
+- StoreKey is intentionally physical/bootstrap-only and must not be confused with ContentID, TreeID, RevisionID, or other semantic identities.
+- The bootstrap publication implementation requires hard-link support on the same filesystem.
+- Rust Windows directory-fsync durability is not yet implemented or claimed.
+
+### Validation
+- Full executable Python reference suite: 43/43 passing with warnings treated as errors.
+- Python syntax compilation and identity/codec/store vector regeneration checks pass.
+- Storage stress pass: 40 rounds × 24 concurrent identical writers plus corruption/scrub/restore verification passed.
+- Rust tests/clippy/format remain unexecuted because the current environment has no Rust toolchain; they are not claimed as passing.
 
 ## [0.0.4] - 2026-08-20
 

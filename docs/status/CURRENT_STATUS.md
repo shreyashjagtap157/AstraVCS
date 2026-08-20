@@ -2,11 +2,11 @@
 
 ## Version
 
-`v0.0.4`
+`v0.0.5`
 
 ## Truthful implementation state
 
-AstraVCS is at semantic-reference-model bootstrap. The production VCS does not yet exist.
+AstraVCS remains in semantic/bootstrap-storage implementation. It is not yet a usable production VCS.
 
 ## Implemented in this repository
 
@@ -16,27 +16,36 @@ AstraVCS is at semantic-reference-model bootstrap. The production VCS does not y
 - Rules for amendment, rebase identity preservation, rename/copy identity, deterministic conflict identity, and operation undo.
 - Initial Rust `astra-model` crate mirroring core structures.
 - Executable Python invariant suite.
-- Shared bootstrap canonical identity specification and golden vectors for Python/Rust compatibility.
-- Cross-language TreeID encoding aligned and ConflictID affected-node ordering canonicalized.
-- Strict bootstrap ObjectEnvelope framing implemented in Python and mirrored in Rust.
-- Semantic validation implemented for bootstrap paths, identifiers, nodes, Trees, Revisions, RepositoryViews, Operations, and Conflicts.
-- Compare-and-swap repository operation-head publication and divergent-operation recording implemented in the reference model and mirrored in Rust.
+- Shared canonical identity, codec, and loose-store compatibility vectors.
+- Strict bootstrap ObjectEnvelope framing in Python and Rust.
+- Semantic validation for bootstrap paths, identifiers, nodes, Trees, Revisions, RepositoryViews, Operations, and Conflicts.
+- Compare-and-swap repository operation-head publication and divergent-operation recording.
+- First durable bootstrap loose-object CAS reference implementation.
+- Dedicated Rust `astra-store` crate mirroring the loose-store semantics.
+- Domain-separated physical `StoreKey` explicitly separated from semantic repository IDs.
+- Atomic same-filesystem hard-link publication from a fully-written + fsynced temporary object.
+- Idempotent duplicate writes with winner verification.
+- Corrupt-object detection, quarantine, repair-on-put, scrub, and temporary-residue cleanup.
+- Concurrent duplicate writer convergence tests and pre/post-publication fault tests.
 
 ## Validation completed in the current environment
 
-- Python reference, codec, and validation tests: 29/29 passing with warnings promoted to errors.
-- Python syntax compilation: passing with warnings promoted to errors.
-- Checked-in canonical identity and codec vectors reproduce byte-for-byte from the Python reference generators.
-- Git repository clean after milestone commit when this status was prepared.
+- Python reference/codec/validation/store suite: 43/43 passing with warnings promoted to errors.
+- Python syntax compilation passes.
+- Checked-in identity, codec, and store vectors reproduce byte-for-byte from Python generators.
+- Git whitespace/diff validation passes.
+- Additional storage stress pass: 40 rounds × 24 concurrent writers, each followed by corruption, scrub/quarantine, republish, and read-back verification.
 
 ## Validation not available here
 
-The current environment has no Rust toolchain. Rust compilation, clippy and Rust unit tests are therefore not claimed. This is a known environment limitation, not a passing result.
+The current environment has no Rust toolchain (`cargo`, `rustc`, `rustfmt`, and Clippy are unavailable). Rust compilation, formatting, Clippy, and Rust unit tests are therefore **not claimed as passing**. Rust store tests and shared vectors are authored for execution as soon as a Rust-enabled environment is available.
+
+Windows directory durability for the Rust loose store is also not yet claimed. The current implementation explicitly documents this compatibility gap rather than pretending POSIX `fsync` behavior is portable.
 
 ## Bootstrap remote status
 
-The recovered repository currently has only the local historical bundle as a recovery source. No writable external Git remote is configured, so this milestone can be committed and tagged locally but cannot truthfully be pushed to an actual remote until one is configured.
+The repository is reconstructed from the latest milestone bundle when persistent `.git` metadata is unavailable. No writable external Git remote is configured, so milestones can be committed/tagged locally and exported as bundles but cannot truthfully be pushed to an external remote.
 
 ## Next implementation target
 
-`v0.0.5`: implement the first durable loose-object content-addressed store against the validated bootstrap envelope, including atomic write/publication, verification, quarantine behavior, corruption detection, and store-level fault tests. Automatic reconciliation of divergent operation heads remains separately tracked and must not be invented implicitly.
+After `v0.0.5` is committed and verified, `v0.0.6` should integrate canonical semantic-object serialization with the store, add repository initialization/layout and object lookup by semantic identity mapping, and begin repository-level fsck/recovery without prematurely adding packed storage.

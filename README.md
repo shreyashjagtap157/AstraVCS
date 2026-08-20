@@ -4,7 +4,7 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.0.4` — strict codec, semantic validation, and concurrent operation-head safety milestone.
+`v0.0.5` — first durable bootstrap loose-object CAS milestone.
 
 The repository currently contains:
 
@@ -16,6 +16,8 @@ The repository currently contains:
 - shared canonical identity vectors consumed by the Python and Rust models;
 - strict bootstrap object envelope and malformed-input rejection;
 - centralized semantic validation and stale operation-head detection;
+- first durable bootstrap loose-object CAS with corruption quarantine, scrub, and idempotent concurrent publication;
+- shared StoreKey compatibility vectors for Python/Rust implementations;
 - documented compatibility/validation cycle for all future changes.
 
 No production VCS functionality is claimed yet.
@@ -27,3 +29,7 @@ Git is the bootstrap VCS. AstraVCS will not become self-hosting until repository
 ## Implementation principle
 
 Repository meaning is stable; storage, indexes, transports, UI frameworks, AI models, plugin runtimes, and server topology are replaceable implementation details.
+
+## Current storage milestone
+
+`v0.0.5` adds the first bootstrap durable loose-object CAS. Physical `StoreKey` is deliberately distinct from semantic repository identities so later packed/segment storage or canonical-format changes can be introduced through verified migrations without redefining repository meaning.
