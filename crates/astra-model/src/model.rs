@@ -152,7 +152,9 @@ impl Conflict {
         for input in &self.inputs {
             bytes.extend_from_slice(&input.0);
         }
-        for node in &self.affected_nodes {
+        let mut affected_nodes = self.affected_nodes.clone();
+        affected_nodes.sort();
+        for node in &affected_nodes {
             bytes.extend_from_slice(&node.0);
         }
         ObjectId::digest(b"ASTRA:CONFLICT:V0", &[&bytes])
@@ -272,4 +274,124 @@ mod tests {
         assert_eq!(a.change_version, b.change_version);
         assert_ne!(a.id(), b.id());
     }
+
+    fn expected_vector(name: &str) -> &'static str {
+        include_str!("../../../tests/vectors/bootstrap-v0.tsv")
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .find_map(|line| {
+                let (key, value) = line.split_once('\t')?;
+                (key == name).then_some(value)
+            })
+            .unwrap_or_else(|| panic!("missing canonical vector: {name}"))
+    }
+
+    #[test]
+    fn conflict_affected_node_order_is_canonical() {
+        let left = ObjectId::digest(b"TEST", &[b"left"]);
+        let right = ObjectId::digest(b"TEST", &[b"right"]);
+        let node_a = NodeId::from_bytes([0; 16]);
+        let node_b = NodeId::from_bytes([1; 16]);
+        let a = Conflict {
+            kind: b"text/text".to_vec(),
+            inputs: vec![left, right],
+            affected_nodes: vec![node_a, node_b],
+        };
+        let b = Conflict {
+            kind: b"text/text".to_vec(),
+            inputs: vec![left, right],
+            affected_nodes: vec![node_b, node_a],
+        };
+        assert_eq!(a.id(), b.id());
+    }
+
+    #[test]
+    fn bootstrap_canonical_vectors_match() {
+        let node_a = NodeId::from_bytes([
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        ]);
+        let node_b = NodeId::from_bytes([
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        ]);
+        let change_id = ChangeId::from_bytes([
+            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+            0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+        ]);
+
+        let content_hello = ContentId::from_bytes(b"hello");
+        let content_link = ContentId::from_bytes(b"../README.md");
+        assert_eq!(content_hello.0.to_hex(), expected_vector("content.hello"));
+        assert_eq!(content_link.0.to_hex(), expected_vector("content.link"));
+
+        let mut tree_before = Tree::default();
+        tree_before.entries.insert(
+            b"README.md".to_vec(),
+            NodeEntry {
+                node_id: node_a,
+                kind: NodeKind::File,
+                content: Some(content_hello),
+                derived_from: None,
+            },
+        );
+        assert_eq!(tree_before.id().to_hex(), expected_vector("tree.before"));
+
+        let mut tree_after = Tree::default();
+        tree_after.entries.insert(
+            b"docs/README.md".to_vec(),
+            NodeEntry {
+                node_id: node_a,
+                kind: NodeKind::File,
+                content: Some(content_hello),
+                derived_from: None,
+            },
+        );
+        tree_after.entries.insert(
+            b"latest".to_vec(),
+            NodeEntry {
+                node_id: node_b,
+                kind: NodeKind::Symlink,
+                content: Some(content_link),
+                derived_from: Some(node_a),
+            },
+        );
+        assert_eq!(tree_after.id().to_hex(), expected_vector("tree.after"));
+
+        let change = ChangeVersion {
+            change_id,
+            message: b"move docs and add link".to_vec(),
+            tree_before: tree_before.id(),
+            tree_after: tree_after.id(),
+        };
+        assert_eq!(change.id().to_hex(), expected_vector("change.version"));
+
+        let parent = ObjectId::digest(b"TEST:PARENT", &[b"parent"]);
+        let revision = Revision {
+            parents: vec![parent],
+            tree: tree_after.id(),
+            change_version: Some(change.id()),
+        };
+        assert_eq!(revision.id().to_hex(), expected_vector("revision.sample"));
+
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".to_vec(), revision.id());
+        view.workspace_heads.insert(b"default".to_vec(), revision.id());
+        assert_eq!(view.id().to_hex(), expected_vector("view.sample"));
+
+        let operation = Operation {
+            parents: vec![],
+            view: view.id(),
+            command: b"publish main".to_vec(),
+        };
+        assert_eq!(operation.id().to_hex(), expected_vector("operation.sample"));
+
+        let conflict = Conflict {
+            kind: b"rename/rename".to_vec(),
+            inputs: vec![tree_before.id(), tree_after.id()],
+            affected_nodes: vec![node_b, node_a],
+        };
+        assert_eq!(conflict.id().to_hex(), expected_vector("conflict.sample"));
+    }
+
 }

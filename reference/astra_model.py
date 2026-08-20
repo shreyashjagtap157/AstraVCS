@@ -50,12 +50,23 @@ class Tree:
     @property
     def tree_id(self) -> str:
         payload = bytearray()
+        kind_codes = {"file": 1, "directory": 2, "symlink": 3}
         for path, entry in self.entries:
+            try:
+                kind_code = kind_codes[entry.kind]
+            except KeyError as exc:
+                raise ValueError(f"unsupported node kind: {entry.kind!r}") from exc
             payload += _blob(path)
             payload += bytes.fromhex(entry.node_id)
-            payload += _blob(entry.kind.encode())
-            payload += _blob(bytes.fromhex(entry.content_id) if entry.content_id else b"")
-            payload += _blob(bytes.fromhex(entry.derived_from) if entry.derived_from else b"")
+            payload += bytes((kind_code,))
+            if entry.content_id is None:
+                payload += b"\x00"
+            else:
+                payload += b"\x01" + bytes.fromhex(entry.content_id)
+            if entry.derived_from is None:
+                payload += b"\x00"
+            else:
+                payload += b"\x01" + bytes.fromhex(entry.derived_from)
         return digest(b"ASTRA:TREE:V0", bytes(payload))
 
     def rename(self, source: bytes, destination: bytes) -> "Tree":

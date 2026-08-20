@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "reference"))
 
 from astra_model import ChangeVersion, Conflict, NodeEntry, Operation, RepositoryHistory, RepositoryView, Revision, Tree, digest, logical_id
+from generate_vectors import render_vectors
 
 
 class SemanticModelTests(unittest.TestCase):
@@ -81,6 +82,26 @@ class SemanticModelTests(unittest.TestCase):
         self.assertEqual(history.current_view, view_b)
         history.undo()
         self.assertEqual(history.current_view, view_a)
+
+    def test_conflict_affected_node_order_is_canonical(self):
+        node_a = "000102030405060708090a0b0c0d0e0f"
+        node_b = "101112131415161718191a1b1c1d1e1f"
+        left = digest(b"TEST", b"left")
+        right = digest(b"TEST", b"right")
+        a = Conflict(b"text/text", (left, right), (node_a, node_b))
+        b = Conflict(b"text/text", (left, right), (node_b, node_a))
+        self.assertEqual(a.conflict_id, b.conflict_id)
+
+    def test_unsupported_node_kind_is_rejected(self):
+        tree = Tree.from_dict({
+            b"device": NodeEntry("00" * 16, "device", None),
+        })
+        with self.assertRaisesRegex(ValueError, "unsupported node kind"):
+            _ = tree.tree_id
+
+    def test_checked_in_canonical_vectors_match_reference_model(self):
+        checked_in = (ROOT / "tests" / "vectors" / "bootstrap-v0.tsv").read_text(encoding="utf-8")
+        self.assertEqual(checked_in, render_vectors())
 
 
 if __name__ == "__main__":
