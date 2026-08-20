@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "reference"))
 
-from astra_model import ChangeVersion, NodeEntry, Operation, RepositoryView, Revision, Tree, digest, logical_id
+from astra_model import ChangeVersion, Conflict, NodeEntry, Operation, RepositoryHistory, RepositoryView, Revision, Tree, digest, logical_id
 
 
 class SemanticModelTests(unittest.TestCase):
@@ -60,6 +60,27 @@ class SemanticModelTests(unittest.TestCase):
         t1 = Tree.from_dict({b"a": a, b"b": b})
         t2 = Tree.from_dict({b"b": b, b"a": a})
         self.assertEqual(t1.tree_id, t2.tree_id)
+
+    def test_conflict_is_first_class_and_deterministic(self):
+        node = logical_id()
+        left = digest(b"TEST", b"left")
+        right = digest(b"TEST", b"right")
+        c1 = Conflict(b"text/text", (left, right), (node,))
+        c2 = Conflict(b"text/text", (left, right), (node,))
+        self.assertEqual(c1.conflict_id, c2.conflict_id)
+
+    def test_operation_undo_restores_previous_view(self):
+        history = RepositoryHistory()
+        rev_a = digest(b"TEST", b"rev-a")
+        rev_b = digest(b"TEST", b"rev-b")
+        view_a = RepositoryView.create({b"main": rev_a})
+        view_b = RepositoryView.create({b"main": rev_b})
+        first = history.publish(view_a, b"publish a")
+        second = history.publish(view_b, b"publish b")
+        self.assertNotEqual(first, second)
+        self.assertEqual(history.current_view, view_b)
+        history.undo()
+        self.assertEqual(history.current_view, view_a)
 
 
 if __name__ == "__main__":

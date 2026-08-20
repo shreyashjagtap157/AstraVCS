@@ -31,12 +31,16 @@ impl Tree {
         Ok(())
     }
 
-    pub fn copy_node(&mut self, from: &[u8], to: Vec<u8>) -> Result<NodeId, &'static str> {
+    pub fn copy_node(
+        &mut self,
+        from: &[u8],
+        to: Vec<u8>,
+        new_id: NodeId,
+    ) -> Result<NodeId, &'static str> {
         if self.entries.contains_key(&to) {
             return Err("destination already exists");
         }
         let source = self.entries.get(from).cloned().ok_or("source does not exist")?;
-        let new_id = NodeId::bootstrap_new();
         let copied = NodeEntry {
             node_id: new_id,
             kind: source.kind,
@@ -206,7 +210,7 @@ mod tests {
     #[test]
     fn rename_preserves_node_identity() {
         let content = ContentId::from_bytes(b"hello");
-        let node_id = NodeId::bootstrap_new();
+        let node_id = NodeId::from_bytes([1; 16]);
         let mut tree = Tree::default();
         tree.entries.insert(
             b"a.txt".to_vec(),
@@ -223,7 +227,7 @@ mod tests {
 
     #[test]
     fn copy_creates_new_node_identity_and_provenance() {
-        let source_id = NodeId::bootstrap_new();
+        let source_id = NodeId::from_bytes([2; 16]);
         let mut tree = Tree::default();
         tree.entries.insert(
             b"a.txt".to_vec(),
@@ -234,14 +238,15 @@ mod tests {
                 derived_from: None,
             },
         );
-        let copy_id = tree.copy_node(b"a.txt", b"b.txt".to_vec()).unwrap();
+        let expected_copy_id = NodeId::from_bytes([3; 16]);
+        let copy_id = tree.copy_node(b"a.txt", b"b.txt".to_vec(), expected_copy_id).unwrap();
         assert_ne!(source_id, copy_id);
         assert_eq!(tree.entries[b"b.txt".as_slice()].derived_from, Some(source_id));
     }
 
     #[test]
     fn amend_preserves_change_id_but_changes_version_id() {
-        let change_id = ChangeId::bootstrap_new();
+        let change_id = ChangeId::from_bytes([4; 16]);
         let before = ObjectId::digest(b"TEST", &[b"before"]);
         let after = ObjectId::digest(b"TEST", &[b"after"]);
         let after2 = ObjectId::digest(b"TEST", &[b"after2"]);

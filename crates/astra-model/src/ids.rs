@@ -1,7 +1,5 @@
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ObjectId(pub [u8; 32]);
@@ -47,32 +45,14 @@ pub struct NodeId(pub [u8; 16]);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ChangeId(pub [u8; 16]);
 
-static LOGICAL_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn bootstrap_logical_id(domain: &[u8]) -> [u8; 16] {
-    // Bootstrap-only generator: combines process-local monotonic state and
-    // high-resolution wall time before hashing. Production must replace this
-    // with an OS CSPRNG-backed generator before stable-format freeze.
-    let counter = LOGICAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
-        .to_be_bytes();
-    let digest = ObjectId::digest(domain, &[&now, &counter.to_be_bytes()]);
-    let mut out = [0_u8; 16];
-    out.copy_from_slice(&digest.0[..16]);
-    out
-}
-
 impl NodeId {
-    pub fn bootstrap_new() -> Self {
-        Self(bootstrap_logical_id(b"ASTRA:NODE-ID:BOOTSTRAP"))
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
     }
 }
 
 impl ChangeId {
-    pub fn bootstrap_new() -> Self {
-        Self(bootstrap_logical_id(b"ASTRA:CHANGE-ID:BOOTSTRAP"))
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
     }
 }

@@ -164,3 +164,57 @@ class Operation:
             bytes.fromhex(self.view_id),
             self.command,
         )
+
+@dataclass(frozen=True)
+class Conflict:
+    kind: bytes
+    inputs: Tuple[str, ...]
+    affected_nodes: Tuple[str, ...]
+
+    @property
+    def conflict_id(self) -> str:
+        payload = bytearray()
+        payload += _blob(self.kind)
+        for oid in self.inputs:
+            payload += bytes.fromhex(oid)
+        for node_id in sorted(self.affected_nodes):
+            payload += bytes.fromhex(node_id)
+        return digest(b"ASTRA:CONFLICT:V0", bytes(payload))
+
+
+@dataclass
+class RepositoryHistory:
+    """Minimal in-memory repository operation history.
+
+    Views and operations are immutable values. `head` is the only mutable
+    pointer in this reference helper and represents the current repository
+    operation head.
+    """
+
+    views: Dict[str, RepositoryView] = field(default_factory=dict)
+    operations: Dict[str, Operation] = field(default_factory=dict)
+    head: Optional[str] = None
+
+    def publish(self, view: RepositoryView, command: bytes) -> str:
+        self.views[view.view_id] = view
+        parents = (self.head,) if self.head else ()
+        op = Operation(parents, view.view_id, command)
+        self.operations[op.operation_id] = op
+        self.head = op.operation_id
+        return op.operation_id
+
+    @property
+    def current_view(self) -> Optional[RepositoryView]:
+        if self.head is None:
+            return None
+        return self.views[self.operations[self.head].view_id]
+
+    def undo(self) -> Optional[str]:
+        if self.head is None:
+            return None
+        current = self.operations[self.head]
+        if not current.parents:
+            self.head = None
+            return None
+        self.head = current.parents[0]
+        return self.head

@@ -2,25 +2,31 @@
 
 ## Version
 
-`v0.0.1-dev`
+`v0.0.2`
 
 ## Truthful implementation state
 
-AstraVCS is at semantic-reference-model bootstrap. The planning artifacts are complete enough to guide implementation, but the production VCS does not yet exist.
+AstraVCS is at semantic-reference-model bootstrap. The production VCS does not yet exist.
 
 ## Implemented in this repository
 
-- Project organization and bootstrap Git repository.
-- Master plan and architecture documents.
-- Reference semantic objects: Content, Tree, Revision, Change, ChangeVersion, Node, Conflict, RepositoryView, Operation.
-- Reference rules for change amendment, rebase identity preservation, node rename/copy identity, operation undo, and canonical revision identity.
-- Rust `astra-model` crate skeleton mirroring the reference model.
-- Executable Python invariant tests.
+- Organized project structure and Git bootstrap repository.
+- Corrected master plan plus adversarial architecture reconciliation.
+- Reference semantic objects: Content, Tree, Revision, Change/ChangeVersion, Node, Conflict, RepositoryView, Operation.
+- Rules for amendment, rebase identity preservation, rename/copy identity, deterministic conflict identity, and operation undo.
+- Initial Rust `astra-model` crate mirroring core structures.
+- Executable Python invariant suite.
 
-## Not yet implemented
+## Validation completed in the current environment
 
-Everything beyond the reference-model layer, including durable object storage, production canonical codec, working copy, refs, merge engine, networking, Git bridge, server, web/native apps, plugins, AI, agents, scale systems, Mission Assurance, self-hosting, and production qualification.
+- Python semantic tests: 8/8 passing.
+- Python syntax compilation: passing.
+- Git repository clean after milestone commit when this status was prepared.
 
-## Environment limitation
+## Validation not available here
 
-The current execution environment has Git and Python but no Rust toolchain. Rust source is therefore authored but cannot yet be compiled here. Python reference tests are used to validate semantics until a Rust toolchain is available.
+The current environment has no Rust toolchain. Rust compilation, clippy and Rust unit tests are therefore not claimed. This is a known environment limitation, not a passing result.
+
+## Next implementation target
+
+`v0.0.3`: strengthen semantic canonicalization and repository-history modeling, add deterministic test vectors shared between Python and Rust, and define the production canonical codec boundary before durable storage work begins.
