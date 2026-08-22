@@ -121,7 +121,7 @@ class LocalWorkspace:
             entry=NodeEntry(node_id,kind,cid,None,mode)
             entries[rel]=entry
             newindex[rel]={"node_id":node_id,"kind":kind,"mode":mode}
-            if persist_contents: self.repo.put(data)
+            if persist_contents: self.repo.put_content(data)
         return Tree.from_dict(entries,1),newindex
 
     def base_tree(self) -> Tree:

@@ -91,7 +91,7 @@ class MergeEngine:
                 elif le.content_id==be.content_id:cid=re.content_id
                 elif re.content_id==be.content_id:cid=le.content_id
                 elif le.kind=='file' and re.kind=='file' and be.content_id:
-                    merged=_merge_text(self.repo.get(ObjectType.CONTENT,be.content_id),self.repo.get(ObjectType.CONTENT,le.content_id),self.repo.get(ObjectType.CONTENT,re.content_id))
+                    merged=_merge_text(self.repo.get_content(be.content_id),self.repo.get_content(le.content_id),self.repo.get_content(re.content_id))
                     if merged is not None:cid=self.repo.put(merged).semantic_id
                 if cid is None: conflict('content/content',node);continue
                 chosen=(path,NodeEntry(node,le.kind,cid,le.derived_from or re.derived_from,mode))

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 - Native Data and Synchronization
+
+- Added native large-content storage with whole-file ContentID identity and replaceable GearCDC-v1 chunk layout.
+- Added chunk and manifest integrity verification plus large-content scrub support.
+- Added verified offline bundle creation/application including large-content payloads and optional repository-state publication.
+- Added transport-independent graph synchronization primitives with a local repository transport.
+- Updated worktree, merge, and Git interoperability paths to use transparent small/large content access.
+
+
 ## 0.1.0 - Local VCS Core
 
 - Added schema-v1 Trees with normalized executable/file/symlink modes while preserving v0 identity and decoding.

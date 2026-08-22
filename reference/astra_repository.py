@@ -483,3 +483,26 @@ AstraRepository.publish_view = publish_view
 AstraRepository.update_view = update_view
 AstraRepository.recover_operation_head = recover_operation_head
 AstraRepository.metadata_root = property(lambda self: self.meta)
+
+# Transparent native large-content access. Whole-file semantic ContentID remains
+# authoritative; chunking is a replaceable physical representation.
+def put_content(self: AstraRepository, data: bytes, *, large_threshold: int = 1024 * 1024):
+    from astra_large import LargeContentStore
+    from astra_semantic_codec import content_id
+    if len(data) <= large_threshold:
+        return self.put(data)
+    store = LargeContentStore(self); manifest = store.put(data)
+    return StoredSemanticObject(content_id(data), manifest.content_id, True)
+
+def get_content(self: AstraRepository, content_oid: str) -> bytes:
+    from astra_large import LargeContentStore, LargeObjectNotFound
+    try:
+        value = self.get(ObjectType.CONTENT, content_oid)
+        if not isinstance(value, bytes): raise SemanticMappingError('ContentID did not resolve to bytes')
+        return value
+    except SemanticObjectNotFoundError:
+        try: return LargeContentStore(self).get(content_oid)
+        except LargeObjectNotFound as exc: raise SemanticObjectNotFoundError(content_oid) from exc
+
+AstraRepository.put_content = put_content
+AstraRepository.get_content = get_content

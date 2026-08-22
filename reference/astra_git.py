@@ -88,7 +88,7 @@ def import_git(source:os.PathLike|str,target:AstraRepository)->GitImportResult:
             prev=target.get(ObjectType.REVISION,parents[0]); first_tree=target.get(ObjectType.TREE,prev.tree_id)
         entries={}
         for path,data,kind,mode,previous,intro in _git_tree(source,oid,first_tree):
-            content=target.put(data); node_id=previous.node_id if previous and previous.kind==kind else _det_node(oid,path)
+            content=target.put_content(data); node_id=previous.node_id if previous and previous.kind==kind else _det_node(oid,path)
             entries[path]=NodeEntry(node_id,kind,content.semantic_id,None,mode)
         tree=Tree.from_dict(entries,1); target.put(tree)
         before=first_tree or empty
@@ -120,7 +120,7 @@ def _export_tree(dest:Path,repo:AstraRepository,tree:Tree)->str:
         for name,value in d.items():
             if isinstance(value,dict): oid=emit(value); mode=b'40000'
             else:
-                data=repo.get(ObjectType.CONTENT,value.content_id); oid=_write_git_object(dest,'blob',data)
+                data=repo.get_content(value.content_id); oid=_write_git_object(dest,'blob',data)
                 mode={MODE_FILE:b'100644',MODE_EXECUTABLE:b'100755',MODE_SYMLINK:b'120000'}[value.normalized_mode]
             # Git sorts directory names as if suffixed with '/'. Python byte ordering is
             # sufficient for ordinary names; use the exact Git key for edge cases.
