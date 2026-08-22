@@ -1,0 +1,16 @@
+[Unit]
+Description=AstraVCS reference server
+After=network.target
+[Service]
+Type=simple
+User=astravcs
+Group=astravcs
+ExecStart=/opt/astravcs/serve.py --root /var/lib/astravcs --host 127.0.0.1 --port 8080
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/astravcs
+ProtectHome=true
+[Install]
+WantedBy=multi-user.target

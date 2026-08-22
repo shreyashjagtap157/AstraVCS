@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: astravcs}
+spec:
+  serviceName: astravcs
+  replicas: 1
+  selector: {matchLabels: {app: astravcs}}
+  template:
+    metadata: {labels: {app: astravcs}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      containers:
+      - name: astravcs
+        image: astravcs/astravcs:0.7.0
+        ports: [{containerPort: 8080}]
+        volumeMounts: [{name: data, mountPath: /var/lib/astravcs}]
+        securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+        readinessProbe: {httpGet: {path: /v1/health, port: 8080}, initialDelaySeconds: 2, periodSeconds: 5}
+        livenessProbe: {httpGet: {path: /v1/health, port: 8080}, initialDelaySeconds: 5, periodSeconds: 10}
+  volumeClaimTemplates:
+  - metadata: {name: data}
+    spec: {accessModes: ["ReadWriteOnce"], resources: {requests: {storage: 20Gi}}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: astravcs}
+spec: {selector: {app: astravcs}, ports: [{port: 80, targetPort: 8080}]}

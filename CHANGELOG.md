@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 - Qualification and Deployable Single-Node Profile
+
+- Added randomized malformed-envelope/semantic-payload adversarial tests and repeated commit/checkout/fsck stress.
+- Added bundle path-traversal rejection test and centralized validation runner.
+- Added deterministic benchmark capture for worktree status and graph-index rebuild.
+- Added non-root, capability-dropped, read-only-root Docker deployment and single-replica Kubernetes StatefulSet.
+- Added hardened systemd unit and explicit prohibition on unsafe multi-replica deployment with the local SQLite/CAS backend.
+- Validation runner executes Python warning-clean tests, Python compilation, Git whitespace checks, TypeScript typechecks, Go tests, Java compilation, Rust workspace tests when a Rust toolchain is available, and reference benchmarks.
+
+
 ## 0.6.0 - Cryptographic Assurance and Protected Collaboration
 
 - Added immutable Attestation and ReleaseManifest semantic objects.
