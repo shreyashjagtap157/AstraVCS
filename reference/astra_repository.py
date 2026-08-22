@@ -27,6 +27,8 @@ _OBJECT_DIRS = {
     ObjectType.VIEW: "view",
     ObjectType.OPERATION: "operation",
     ObjectType.CONFLICT: "conflict",
+    ObjectType.ATTESTATION: "attestation",
+    ObjectType.RELEASE_MANIFEST: "release-manifest",
 }
 
 

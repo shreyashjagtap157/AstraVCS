@@ -9,7 +9,7 @@ class CollaborationStore:
   self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True);self.db=sqlite3.connect(self.path,check_same_thread=False);self.db.row_factory=sqlite3.Row
   self.db.executescript('''
   PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-  CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, repo TEXT,target_ref TEXT,source_revision TEXT,status TEXT,created_by TEXT,created_at INTEGER);
+  CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, repo TEXT,target_ref TEXT,target_revision TEXT,source_revision TEXT,status TEXT,created_by TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS reviews(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,reviewer TEXT,state TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS checks(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,name TEXT,status TEXT,conclusion TEXT,details TEXT,updated_at INTEGER,UNIQUE(proposal_id,name));
   CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT,repo TEXT,actor TEXT,payload TEXT,created_at INTEGER);
@@ -17,8 +17,10 @@ class CollaborationStore:
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
   cur=self.db.execute('INSERT INTO events(type,repo,actor,payload,created_at) VALUES(?,?,?,?,?)',(event_type,repo,actor,json.dumps(payload,sort_keys=True,separators=(',',':')),int(time.time())));self.db.commit();return cur.lastrowid
- def open_proposal(self,repo,target_ref,source_revision,actor):
-  pid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO proposals VALUES(?,?,?,?,?,?,?)',(pid,repo,target_ref,source_revision,'open',actor,now));self.db.commit();self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'source_revision':source_revision});return pid
+ def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None):
+  pid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO proposals VALUES(?,?,?,?,?,?,?,?)',(pid,repo,target_ref,target_revision,source_revision,'open',actor,now));self.db.commit();self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision});return pid
+ def get_proposal(self,pid):
+  r=self.db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   return [dict(x) for x in self.db.execute('SELECT * FROM proposals WHERE repo=? AND status=? ORDER BY created_at,id',(repo,status))]
  def add_review(self,pid,reviewer,state,body=''):
@@ -34,6 +36,15 @@ class CollaborationStore:
   reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=?',(pid,))]
   checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM checks WHERE proposal_id=?',(pid,))}
   return {'reviews':reviews,'checks':checks}
+ def require_policy(self,pid,policy):
+  evidence=self.policy_evidence(pid);latest={}
+  for r in evidence['reviews']:latest[r['reviewer']]=r['state']
+  approvals=sum(1 for state in latest.values() if state=='approved')
+  if approvals<policy.required_reviews:raise PlatformError(f'proposal requires {policy.required_reviews} approvals; has {approvals}')
+  for name in policy.required_checks:
+   c=evidence['checks'].get(name)
+   if not c or c.get('status')!='completed' or c.get('conclusion')!='success':raise PlatformError(f'required check {name} has not succeeded')
+  return True
  def close_proposal(self,pid,actor,state='merged'):
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')

@@ -12,6 +12,7 @@ from typing import Callable
 
 from astra_codec import ObjectEnvelope, ObjectType
 from astra_model import (
+    Attestation,
     Attribution,
     ChangeVersion,
     Conflict,
@@ -19,6 +20,7 @@ from astra_model import (
     Operation,
     RepositoryView,
     Revision,
+    ReleaseManifest,
     Tree,
     digest,
     validate_node_id,
@@ -111,6 +113,10 @@ def semantic_id(value: object) -> str:
         return value.operation_id
     if isinstance(value, Conflict):
         return value.conflict_id
+    if isinstance(value, Attestation):
+        return value.attestation_id
+    if isinstance(value, ReleaseManifest):
+        return value.manifest_id
     raise TypeError(f"unsupported semantic object: {type(value)!r}")
 
 
@@ -129,6 +135,10 @@ def object_type_for(value: object) -> ObjectType:
         return ObjectType.OPERATION
     if isinstance(value, Conflict):
         return ObjectType.CONFLICT
+    if isinstance(value, Attestation):
+        return ObjectType.ATTESTATION
+    if isinstance(value, ReleaseManifest):
+        return ObjectType.RELEASE_MANIFEST
     raise TypeError(f"unsupported semantic object: {type(value)!r}")
 
 
@@ -370,6 +380,37 @@ def _decode_conflict(payload: bytes) -> Conflict:
     return value
 
 
+def _encode_attestation(value: Attestation) -> bytes:
+    value.validate()
+    return (_oid(value.subject_id, "attestation subject") + _blob(value.predicate_type)
+            + _blob(value.payload) + _oid(value.signer_key_id, "signer key id")
+            + _blob(value.signature))
+
+
+def _decode_attestation(payload: bytes) -> Attestation:
+    r=_Reader(payload); value=Attestation(r.take(32).hex(),r.blob(),r.blob(),r.take(32).hex(),r.blob());r.finish()
+    try:value.validate()
+    except ValueError as exc:raise SemanticCodecError(str(exc)) from exc
+    return value
+
+
+def _encode_release(value: ReleaseManifest) -> bytes:
+    value.validate(); out=bytearray(_blob(value.name));out+=value.sequence.to_bytes(8,"big");out+=_u32(len(value.revisions))
+    for oid in value.revisions:out+=_oid(oid,"release revision")
+    out+=_u32(len(value.artifacts))
+    for name,oid in value.artifacts:out+=_blob(name)+_oid(oid,"artifact digest")
+    out+=_u32(len(value.provenance))
+    for oid in value.provenance:out+=_oid(oid,"provenance")
+    return bytes(out)
+
+
+def _decode_release(payload: bytes) -> ReleaseManifest:
+    r=_Reader(payload);name=r.blob();seq=int.from_bytes(r.take(8),"big");revs=tuple(r.take(32).hex() for _ in range(r.count()));arts=tuple((r.blob(),r.take(32).hex()) for _ in range(r.count()));prov=tuple(r.take(32).hex() for _ in range(r.count()));r.finish();value=ReleaseManifest(name,revs,arts,prov,seq)
+    try:value.validate()
+    except ValueError as exc:raise SemanticCodecError(str(exc)) from exc
+    return value
+
+
 def encode_semantic(value: object) -> ObjectEnvelope:
     if isinstance(value, bytes):
         payload = value
@@ -385,6 +426,10 @@ def encode_semantic(value: object) -> ObjectEnvelope:
         payload = _encode_operation(value)
     elif isinstance(value, Conflict):
         payload = _encode_conflict(value)
+    elif isinstance(value, Attestation):
+        payload = _encode_attestation(value)
+    elif isinstance(value, ReleaseManifest):
+        payload = _encode_release(value)
     else:
         raise TypeError(f"unsupported semantic object: {type(value)!r}")
     return ObjectEnvelope(object_type_for(value), payload)
@@ -398,6 +443,8 @@ _DECODERS: dict[ObjectType, Callable[[bytes], object]] = {
     ObjectType.VIEW: _decode_view,
     ObjectType.OPERATION: _decode_operation,
     ObjectType.CONFLICT: _decode_conflict,
+    ObjectType.ATTESTATION: _decode_attestation,
+    ObjectType.RELEASE_MANIFEST: _decode_release,
 }
 
 

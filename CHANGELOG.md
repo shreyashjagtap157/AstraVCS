@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 - Cryptographic Assurance and Protected Collaboration
+
+- Added immutable Attestation and ReleaseManifest semantic objects.
+- Added Ed25519 attestation signing/verification and distinct-key threshold verification.
+- Added anti-rollback trusted sequence state and signed updater metadata verification.
+- Added SLSA-style provenance and SPDX SBOM generation helpers.
+- Added verified backup/restore with checksums, bundle validation and post-restore fsck.
+- Added protected proposal merge policy enforcing approval/check evidence and target-base compare-and-swap.
+- Added pure merge-revision construction for server-side collaboration without materializing a server worktree.
+
+
 ## 0.5.0 - Scale and Partial Materialization Foundation
 
 - Added disposable SQLite graph index with generation numbers, parent traversal, exact changed-path index, and changed-path Bloom summaries.

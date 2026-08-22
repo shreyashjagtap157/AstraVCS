@@ -42,3 +42,24 @@ class HTTPBundleSyncTests(unittest.TestCase):
     local=AstraRepository.init(local_td);client.fetch_bundle('remote',local);self.assertIsNotNone(local.get(__import__('astra_codec').ObjectType.REVISION,rc.revision_id))
     push=AstraRepository.init(push_td);pw=LocalWorkspace(push);(Path(push_td)/'y').write_text('push');pc=pw.commit(b'push');client.push_bundle('remote',push);self.assertIsNotNone(rr.get(__import__('astra_codec').ObjectType.REVISION,pc.revision_id))
    finally:s.close()
+
+class ProtectedProposalMergeTests(unittest.TestCase):
+ def test_protected_merge_requires_review_and_check_and_base_cas(self):
+  from astra_security import Principal,Grant,RefPolicy
+  from astra_server import AstraServer
+  from astra_local import LocalWorkspace
+  import urllib.request,json
+  with tempfile.TemporaryDirectory() as td:
+   s=AstraServer(td,policies=[RefPolicy('refs/heads/main','refs.protected.write',1,('tests',))]);s.registry.create('r');repo=s.registry.open('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base')
+   # Create a source revision without moving main: detached checkout then commit.
+   w.checkout(base.revision_id,ref=None,force=True);(repo.worktree/'x').write_text('source');source=w.commit(b'source')
+   # Restore main/workspace to base and keep source object reachable via proposal metadata.
+   w.checkout(base.revision_id,ref=b'refs/heads/main',force=True)
+   tok=s.tokens.issue(Principal('admin','human'),[Grant('*','*')],None);host,port=s.serve();url=f'http://{host}:{port}'
+   def post(path,body):
+    req=urllib.request.Request(url+path,data=json.dumps(body).encode(),method='POST',headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'});return json.loads(urllib.request.urlopen(req).read())
+   try:
+    p=post('/v1/repos/r/proposals',{'target_ref':'refs/heads/main','source_revision':source.revision_id})['id']
+    with self.assertRaises(urllib.error.HTTPError):post(f'/v1/repos/r/proposals/{p}/merge',{})
+    post(f'/v1/repos/r/proposals/{p}/reviews',{'state':'approved'});post(f'/v1/repos/r/proposals/{p}/checks',{'name':'tests','status':'completed','conclusion':'success'});merged=post(f'/v1/repos/r/proposals/{p}/merge',{})['revision'];self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],merged)
+   finally:s.close()

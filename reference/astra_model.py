@@ -384,3 +384,64 @@ class RepositoryHistory:
         current = self.operations[self.head]
         self.head = current.parents[0] if current.parents else None
         return self.head
+
+
+@dataclass(frozen=True)
+class Attestation:
+    subject_id: str
+    predicate_type: bytes
+    payload: bytes
+    signer_key_id: str
+    signature: bytes
+
+    def validate(self) -> None:
+        validate_object_id(self.subject_id, "attestation subject")
+        validate_name(self.predicate_type, "attestation predicate type")
+        validate_object_id(self.signer_key_id, "signer key id")
+        if len(self.signature) != 64:
+            raise ValueError("Ed25519 attestation signature must be 64 bytes")
+
+    def signing_bytes(self) -> bytes:
+        validate_object_id(self.subject_id, "attestation subject")
+        validate_name(self.predicate_type, "attestation predicate type")
+        validate_object_id(self.signer_key_id, "signer key id")
+        return (_blob(self.predicate_type) + bytes.fromhex(self.subject_id)
+                + bytes.fromhex(self.signer_key_id) + _blob(self.payload))
+
+    @property
+    def attestation_id(self) -> str:
+        self.validate()
+        return digest(b"ASTRA:ATTESTATION:V1", self.signing_bytes(), self.signature)
+
+
+@dataclass(frozen=True)
+class ReleaseManifest:
+    name: bytes
+    revisions: Tuple[str, ...]
+    artifacts: Tuple[Tuple[bytes, str], ...]
+    provenance: Tuple[str, ...] = ()
+    sequence: int = 0
+
+    def validate(self) -> None:
+        validate_name(self.name, "release name")
+        if not self.revisions:
+            raise ValueError("release manifest requires at least one revision")
+        for oid in self.revisions: validate_object_id(oid, "release revision")
+        if len(set(self.revisions)) != len(self.revisions): raise ValueError("duplicate release revision")
+        prev = None
+        for name, oid in self.artifacts:
+            validate_name(name, "artifact name"); validate_object_id(oid, "artifact digest")
+            if prev is not None and name <= prev: raise ValueError("artifacts must be canonically ordered")
+            prev = name
+        for oid in self.provenance: validate_object_id(oid, "provenance object")
+        if self.sequence < 0 or self.sequence >= 1 << 64: raise ValueError("release sequence outside u64")
+
+    @property
+    def manifest_id(self) -> str:
+        self.validate(); payload = bytearray(_blob(self.name)); payload += self.sequence.to_bytes(8,"big")
+        for oid in self.revisions: payload += bytes.fromhex(oid)
+        payload += b"\xff"
+        for name, oid in self.artifacts: payload += _blob(name) + bytes.fromhex(oid)
+        payload += b"\xfe"
+        for oid in self.provenance: payload += bytes.fromhex(oid)
+        return digest(b"ASTRA:RELEASE-MANIFEST:V1", bytes(payload))

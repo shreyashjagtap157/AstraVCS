@@ -9,6 +9,7 @@ from astra_model import RepositoryView,validate_object_id
 from astra_repository import AstraRepository
 from astra_security import TokenStore,PolicyEngine,RefPolicy,AuthorizationError,AuthenticationError
 from astra_platform import CollaborationStore
+from astra_merge import MergeEngine
 from astra_bundle import create_bundle,apply_bundle
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
@@ -82,11 +83,21 @@ class AstraServer:
        if expected_old is not None and refs.get(ref)!=expected_old:raise ValueError('stale ref value')
        refs[ref]=oid;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'api-ref-update',expected_head=body.get('expected_operation_head',repo.operation_head()));outer.platform.emit('ref.updated',name,principal.principal_id,{'ref':body['ref'],'revision':oid});return self._json(200,{'ref':body['ref'],'revision':oid,'operation_head':repo.operation_head()})
       if p[3:]==['proposals']:
-       principal=self._require('proposals.write',name);pid=outer.platform.open_proposal(name,body['target_ref'],body['source_revision'],principal.principal_id);return self._json(201,{'id':pid})
+       principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid);return self._json(201,{'id':pid,'target_revision':target_oid})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviews':
        principal=self._require('reviews.write',name);outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''));return self._json(201,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='checks':
        self._require('checks.write',name);outer.platform.set_check(p[4],body['name'],body['status'],body.get('conclusion'),body.get('details',''));return self._json(200,{'ok':True})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='merge':
+       principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')
+       ref=proposal['target_ref'].encode();self._require(outer.policy.required_capability(ref),name);policy=outer.policy.policy_for(ref)
+       if policy:outer.platform.require_policy(p[4],policy)
+       view=repo.current_view();refs=dict(view.refs);current=refs.get(ref)
+       if current!=proposal['target_revision']:raise ValueError('proposal target advanced; rebase or refresh required')
+       if current is None:merged=proposal['source_revision']
+       else:merged=MergeEngine(repo).create_merge_revision(current,proposal['source_revision'])
+       refs[ref]=merged;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'proposal-merge',expected_head=repo.operation_head());outer.platform.close_proposal(p[4],principal.principal_id,'merged');return self._json(200,{'revision':merged})
      return self._json(404,{'error':'not_found'})
     except (AuthenticationError,AuthorizationError) as e:return self._json(403,{'error':str(e)})
     except Exception as e:return self._json(400,{'error':str(e)})

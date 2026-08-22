@@ -27,6 +27,8 @@ class ObjectType(IntEnum):
     VIEW = 5
     OPERATION = 6
     CONFLICT = 7
+    ATTESTATION = 8
+    RELEASE_MANIFEST = 9
 
 
 @dataclass(frozen=True)

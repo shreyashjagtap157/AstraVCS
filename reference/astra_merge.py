@@ -111,17 +111,20 @@ class MergeEngine:
         partial=Tree.from_dict(result,1)
         return MergePreview(base,left,right,None if conflict_ids else partial,partial,tuple(conflict_ids))
 
-    def apply(self,workspace:LocalWorkspace,right:str,*,author:Attribution|None=None):
-        left=workspace.head()
-        if left is None:raise MergeError('workspace has no current revision')
-        # Fast-forward.
+    def create_merge_revision(self,left:str,right:str,*,author:Attribution|None=None,message:bytes=b'Merge'):
         if left in _ancestors(self.repo,right):
-            workspace.checkout(right,ref=workspace.current_ref(),expected_current_revision=left);return right
+            return right
         preview=self.preview(left,right)
         if preview.conflicts:raise MergeError(f'merge has {len(preview.conflicts)} unresolved conflicts')
         tree=preview.merged_tree;self.repo.put(tree)
-        lr=self.repo.get(ObjectType.REVISION,left);cv=ChangeVersion(logical_id(),b'Merge',lr.tree_id,tree.tree_id);self.repo.put(cv)
+        lr=self.repo.get(ObjectType.REVISION,left);cv=ChangeVersion(logical_id(),message,lr.tree_id,tree.tree_id);self.repo.put(cv)
         now=int(time.time());a=author or Attribution(b'Astra User',b'unknown@local',now,0)
         rev=Revision((left,right),tree.tree_id,cv.version_id,1,a,a);self.repo.put(rev)
-        workspace.checkout(rev.revision_id,ref=workspace.current_ref(),expected_current_revision=left)
         return rev.revision_id
+
+    def apply(self,workspace:LocalWorkspace,right:str,*,author:Attribution|None=None):
+        left=workspace.head()
+        if left is None:raise MergeError('workspace has no current revision')
+        oid=self.create_merge_revision(left,right,author=author)
+        workspace.checkout(oid,ref=workspace.current_ref(),expected_current_revision=left)
+        return oid
