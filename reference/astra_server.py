@@ -10,7 +10,7 @@ from astra_repository import AstraRepository
 from astra_security import TokenStore,PolicyEngine,RefPolicy,AuthorizationError,AuthenticationError
 from astra_platform import CollaborationStore
 from astra_merge import MergeEngine
-from astra_bundle import create_bundle,apply_bundle
+from astra_portable_bundle import create_portable_bundle,apply_portable_bundle
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -23,8 +23,8 @@ class RepositoryRegistry:
  def list(self):return sorted(p.name for p in self.root.iterdir() if (p/'.astra').is_dir())
 
 class AstraServer:
- def __init__(self,root,policies=None):
-  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=RepositoryRegistry(self.root/'repos');self.tokens=TokenStore(self.root/'auth.sqlite');self.platform=CollaborationStore(self.root/'platform.sqlite');self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+ def __init__(self,root,policies=None,registry=None,tokens=None,platform=None):
+  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
  def serve(self,host='127.0.0.1',port=0):
   outer=self
   class Handler(BaseHTTPRequestHandler):
@@ -55,7 +55,7 @@ class AstraServer:
        oid=p[4];rev=repo.get(ObjectType.REVISION,oid);return self._json(200,{'revision':oid,'parents':list(rev.parents),'tree':rev.tree_id,'change_version':rev.change_version_id})
       if p[3:]==['bundle']:
        with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-        create_bundle(repo,f.name,include_state=False);raw=Path(f.name).read_bytes()
+        create_portable_bundle(repo,f.name);raw=Path(f.name).read_bytes()
        self.send_response(200);self.send_header('Content-Type','application/vnd.astra.bundle');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['proposals']:return self._json(200,{'proposals':outer.platform.list_proposals(name)})
      if p==['v1','events']:
@@ -75,7 +75,7 @@ class AstraServer:
        if n>512*1024*1024:raise ValueError('bundle too large')
        raw=self.rfile.read(n)
        with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-        Path(f.name).write_bytes(raw);apply_bundle(repo,f.name,publish_state=False)
+        Path(f.name).write_bytes(raw);apply_portable_bundle(repo,f.name,publish_refs=False)
        outer.platform.emit('bundle.applied',name,principal.principal_id,{'bytes':len(raw)});return self._json(200,{'ok':True})
       if p[3:]==['refs']:
        ref=body['ref'].encode();cap=outer.policy.required_capability(ref);principal=self._require(cap,name);oid=body['revision'];validate_object_id(oid);repo.get(ObjectType.REVISION,oid)
@@ -104,4 +104,5 @@ class AstraServer:
   self.http=ThreadingHTTPServer((host,port),Handler);self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start();return self.http.server_address
  def close(self):
   if self.http:self.http.shutdown();self.http.server_close();self.thread.join(timeout=5)
-  self.tokens.close();self.platform.close()
+  if self._owns_tokens:self.tokens.close()
+  if self._owns_platform:self.platform.close()

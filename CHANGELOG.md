@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 - Hosted Storage and Multi-Node Repository Semantics
+
+- Added immutable BlobBackend and transactional MetadataBackend interfaces.
+- Added filesystem and S3-compatible blob backends plus SQLite and PostgreSQL metadata backends.
+- Added HostedRepository with semantic object persistence, operation-head CAS, large-content chunking, and hosted fsck.
+- Added HostedRepositoryRegistry and backend-neutral semantic bundles for local/hosted interchange.
+- Rewired HTTP bundle sync to the backend-neutral format.
+- Added two-node shared-backend HTTP conformance tests demonstrating common repository state across independent server processes.
+
+
 ## 0.7.0 - Qualification and Deployable Single-Node Profile
 
 - Added randomized malformed-envelope/semantic-payload adversarial tests and repeated commit/checkout/fsck stress.
