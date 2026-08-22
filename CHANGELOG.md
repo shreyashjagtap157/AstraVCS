@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - Scale and Partial Materialization Foundation
+
+- Added disposable SQLite graph index with generation numbers, parent traversal, exact changed-path index, and changed-path Bloom summaries.
+- Added explicit metadata-only/partial synchronization promises without treating intentionally missing content as corruption.
+- Added filtered graph synchronization and path-prefix selection.
+- Added disposable incremental worktree content cache to avoid rereading unchanged file bytes.
+- Added scale-oriented regression tests confirming index deletion cannot alter canonical history.
+
+
 ## 0.4.0 - Extensibility, AI and Client Surfaces
 
 - Added capability-scoped plugin registry with explicit permission-diff approval and HMAC-signed webhook envelopes.
