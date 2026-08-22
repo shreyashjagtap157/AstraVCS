@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 - Secure Hosted Platform Foundation
+
+- Added unified principal/token capability authorization with hashed bearer-token storage, expiry, and revocation.
+- Added protected-ref policy capability selection.
+- Added durable SQLite-backed proposals, reviews, checks, and append-only typed platform events.
+- Added modular-monolith repository registry and versioned HTTP API for repository discovery, refs, revisions, proposals, reviews, and checks.
+- Enforced repository mutations through the same canonical repository View/CAS paths used locally.
+- Added lifecycle cleanup and warning-clean server/database tests.
+
+
 ## 0.2.0 - Native Data and Synchronization
 
 - Added native large-content storage with whole-file ContentID identity and replaceable GearCDC-v1 chunk layout.
