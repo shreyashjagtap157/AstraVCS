@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 - Durable Automation, Webhooks and Agent Isolation Contracts
+
+- Added durable CI job persistence and execution orchestration with production-isolation enforcement.
+- Added durable signed-webhook delivery, retry and failure-state tracking.
+- Added signed plugin catalog entries and verification for trusted catalog/update distribution.
+- Added a MicroVM agent-runtime contract with explicit network policy, ephemeral execution, read-only host expectations and resource limits.
+- Kept development callback runtimes explicitly non-production and fail-closed when production isolation is required.
+
+
 ## 0.8.0 - Hosted Storage and Multi-Node Repository Semantics
 
 - Added immutable BlobBackend and transactional MetadataBackend interfaces.

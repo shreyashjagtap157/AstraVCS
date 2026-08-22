@@ -40,3 +40,13 @@ class AgentJobStore:
   try:result=runtime.execute(spec,workspace);status='completed'
   except Exception as exc:result={'error':str(exc)};status='failed'
   self.db.execute('UPDATE jobs SET status=?,result=?,updated=? WHERE id=?',(status,json.dumps(result,sort_keys=True),int(time.time()),jid));self.db.commit();return self.get(jid)
+
+class MicroVMRuntime(AgentRuntime):
+ isolation_level='microvm'
+ def __init__(self,launcher):self.launcher=launcher
+ def execute(self,spec,workspace):
+  if spec.network_policy=='unrestricted' and 'network.unrestricted' not in spec.capabilities:raise AgentError('unrestricted network requires explicit capability')
+  request={'workspace':str(workspace),'task':spec.task,'input_revision':spec.input_revision,'capabilities':list(spec.capabilities),'network_policy':spec.network_policy,'max_seconds':spec.max_seconds,'ephemeral':True,'read_only_host':True}
+  result=self.launcher(request)
+  if not isinstance(result,dict):raise AgentError('microVM launcher returned invalid result')
+  return result
