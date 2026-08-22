@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 - Extensibility, AI and Client Surfaces
+
+- Added capability-scoped plugin registry with explicit permission-diff approval and HMAC-signed webhook envelopes.
+- Added structured model-neutral AI repository context and deterministic offline provider boundary.
+- Added durable agent-job orchestration interfaces with explicit refusal of development-only runtimes in production mode.
+- Added authenticated loopback daemon and MCP/JSON-RPC readonly repository tools.
+- Added authenticated HTTP bundle transport adapter.
+- Added browser console/PWA and shared TypeScript API client with strict CSP and session-only token handling.
+- Added Tauri-class native desktop shell scaffold and Windows/macOS/Linux packaging requirements.
+- Added Python, TypeScript, Go, Java and .NET SDK source; Go tests and Java compilation are part of qualification where toolchains are available.
+
+
 ## 0.3.0 - Secure Hosted Platform Foundation
 
 - Added unified principal/token capability authorization with hashed bearer-token storage, expiry, and revocation.

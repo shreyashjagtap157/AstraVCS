@@ -3,12 +3,13 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs
-import json,re,threading
+import json,re,threading,tempfile
 from astra_codec import ObjectType
 from astra_model import RepositoryView,validate_object_id
 from astra_repository import AstraRepository
 from astra_security import TokenStore,PolicyEngine,RefPolicy,AuthorizationError,AuthenticationError
 from astra_platform import CollaborationStore
+from astra_bundle import create_bundle,apply_bundle
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -51,6 +52,10 @@ class AstraServer:
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
        oid=p[4];rev=repo.get(ObjectType.REVISION,oid);return self._json(200,{'revision':oid,'parents':list(rev.parents),'tree':rev.tree_id,'change_version':rev.change_version_id})
+      if p[3:]==['bundle']:
+       with tempfile.NamedTemporaryFile(suffix='.astra') as f:
+        create_bundle(repo,f.name,include_state=False);raw=Path(f.name).read_bytes()
+       self.send_response(200);self.send_header('Content-Type','application/vnd.astra.bundle');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['proposals']:return self._json(200,{'proposals':outer.platform.list_proposals(name)})
      if p==['v1','events']:
       self._require('events.read');q=parse_qs(urlparse(self.path).query);return self._json(200,{'events':outer.platform.events(int(q.get('after',['0'])[0]))})
@@ -59,11 +64,18 @@ class AstraServer:
     except Exception as e:return self._json(400,{'error':str(e)})
    def do_POST(self):
     try:
-     p=self._parts();body=self._body()
+     p=self._parts();body=None if (len(p)>=4 and p[:2]==['v1','repos'] and p[3:]==['bundle']) else self._body()
      if p==['v1','repos']:
       principal=self._require('repos.create');name=body['name'];outer.registry.create(name);outer.platform.emit('repository.created',name,principal.principal_id,{});return self._json(201,{'name':name})
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2];repo=outer.registry.open(name)
+      if p[3:]==['bundle']:
+       principal=self._require('repo.write',name);n=int(self.headers.get('Content-Length','0'))
+       if n>512*1024*1024:raise ValueError('bundle too large')
+       raw=self.rfile.read(n)
+       with tempfile.NamedTemporaryFile(suffix='.astra') as f:
+        Path(f.name).write_bytes(raw);apply_bundle(repo,f.name,publish_state=False)
+       outer.platform.emit('bundle.applied',name,principal.principal_id,{'bytes':len(raw)});return self._json(200,{'ok':True})
       if p[3:]==['refs']:
        ref=body['ref'].encode();cap=outer.policy.required_capability(ref);principal=self._require(cap,name);oid=body['revision'];validate_object_id(oid);repo.get(ObjectType.REVISION,oid)
        view=repo.current_view();refs=dict(view.refs);expected_old=body.get('expected_old')

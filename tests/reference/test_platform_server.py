@@ -28,3 +28,17 @@ class PlatformTests(unittest.TestCase):
     with self.assertRaises(urllib.error.HTTPError):urllib.request.urlopen(base+'/v1/repos')
    finally:s.close()
 if __name__=='__main__':unittest.main()
+
+class HTTPBundleSyncTests(unittest.TestCase):
+ def test_authenticated_bundle_fetch_and_push(self):
+  from astra_http_sync import HTTPSyncClient
+  from astra_repository import AstraRepository
+  from astra_local import LocalWorkspace
+  from astra_security import Principal,Grant
+  with tempfile.TemporaryDirectory() as td,tempfile.TemporaryDirectory() as local_td,tempfile.TemporaryDirectory() as push_td:
+   s=AstraServer(td);s.registry.create('remote');rr=s.registry.open('remote');rw=LocalWorkspace(rr);(rr.worktree/'x').write_text('remote');rc=rw.commit(b'remote')
+   token=s.tokens.issue(Principal('sync','service'),[Grant('repo.read','remote'),Grant('repo.write','remote')],None);host,port=s.serve();client=HTTPSyncClient(f'http://{host}:{port}',token)
+   try:
+    local=AstraRepository.init(local_td);client.fetch_bundle('remote',local);self.assertIsNotNone(local.get(__import__('astra_codec').ObjectType.REVISION,rc.revision_id))
+    push=AstraRepository.init(push_td);pw=LocalWorkspace(push);(Path(push_td)/'y').write_text('push');pc=pw.commit(b'push');client.push_bundle('remote',push);self.assertIsNotNone(rr.get(__import__('astra_codec').ObjectType.REVISION,pc.revision_id))
+   finally:s.close()
