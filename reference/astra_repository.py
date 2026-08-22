@@ -357,3 +357,129 @@ class AstraRepository:
         store_keys = set(self.store.iter_keys())
         orphans = len(store_keys - referenced_keys)
         return FsckResult(checked, healthy, missing, corrupt, mismatched, malformed, orphans)
+
+# --- Durable mutable repository state (post-v0.0.6 extension) ---
+from contextlib import contextmanager
+from astra_model import Operation, RepositoryView, StaleOperationHeadError
+
+class StateCorruptionError(RepositoryError):
+    pass
+
+@contextmanager
+def _exclusive_file_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+b")
+    try:
+        if os.name != "nt":
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if os.name != "nt":
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _atomic_replace(repo: AstraRepository, path: Path, data: bytes) -> None:
+    repo._mkdir_durable(path.parent)
+    tmp = path.parent / f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    repo._write_file_durable(tmp, data, exclusive=True)
+    os.replace(tmp, path)
+    repo._fsync_dir(path.parent)
+
+
+def _state_paths(self: AstraRepository):
+    state = self.meta / "state"
+    return state, state / "operation-head", state / "operation.lock"
+
+
+def _ensure_state(self: AstraRepository) -> None:
+    state, head, _lock = _state_paths(self)
+    self._mkdir_durable(state)
+    if not head.exists():
+        _atomic_replace(self, head, b"\n")
+
+
+def operation_head(self: AstraRepository) -> str | None:
+    _ensure_state(self)
+    _state, head, _lock = _state_paths(self)
+    raw = head.read_bytes()
+    if raw == b"\n":
+        return None
+    if len(raw) != 65 or not raw.endswith(b"\n"):
+        raise StateCorruptionError("malformed operation head")
+    oid = raw[:-1].decode("ascii", "strict")
+    try: validate_object_id(oid, "operation head")
+    except ValueError as exc: raise StateCorruptionError(str(exc)) from exc
+    return oid
+
+
+def current_view(self: AstraRepository) -> RepositoryView:
+    head = operation_head(self)
+    if head is None:
+        return RepositoryView.create()
+    op = self.get(ObjectType.OPERATION, head)
+    if not isinstance(op, Operation): raise StateCorruptionError("operation head is not an Operation")
+    view = self.get(ObjectType.VIEW, op.view_id)
+    if not isinstance(view, RepositoryView): raise StateCorruptionError("operation points to non-View")
+    return view
+
+
+def publish_view(self: AstraRepository, view: RepositoryView, command: bytes, *, expected_head: str | None) -> str:
+    _ensure_state(self)
+    state, head_path, lock_path = _state_paths(self)
+    with _exclusive_file_lock(lock_path):
+        actual = operation_head(self)
+        if actual != expected_head:
+            raise StaleOperationHeadError(f"stale operation head: expected {expected_head!r}, current {actual!r}")
+        self.put(view)
+        op = Operation((actual,) if actual else (), view.view_id, command)
+        self.put(op)
+        _atomic_replace(self, head_path, (op.operation_id + "\n").encode("ascii"))
+        return op.operation_id
+
+
+def update_view(self: AstraRepository, *, refs: dict[bytes,str] | None = None,
+                workspace_heads: dict[bytes,str] | None = None, command: bytes=b"update") -> str:
+    head = operation_head(self); current = current_view(self)
+    new_refs = dict(current.refs); new_heads = dict(current.workspace_heads)
+    if refs: new_refs.update(refs)
+    if workspace_heads: new_heads.update(workspace_heads)
+    return publish_view(self, RepositoryView.create(new_refs, new_heads), command, expected_head=head)
+
+
+def recover_operation_head(self: AstraRepository) -> str | None:
+    """Recover only when there is exactly one unreferenced operation tip.
+
+    This deliberately refuses ambiguous histories instead of guessing.
+    """
+    _ensure_state(self)
+    try:
+        existing = operation_head(self)
+    except StateCorruptionError:
+        existing = None
+    operations: dict[str, Operation] = {}
+    parents: set[str] = set()
+    for typ, oid, _ in self.iter_mappings():
+        if typ != ObjectType.OPERATION: continue
+        try: op = self.get(typ, oid)
+        except RepositoryError: continue
+        if isinstance(op, Operation):
+            operations[oid] = op; parents.update(op.parents)
+    tips = sorted(set(operations) - parents)
+    if existing in operations:
+        return existing
+    if len(tips) != 1:
+        raise StateCorruptionError(f"cannot uniquely recover operation head; candidates={len(tips)}")
+    _state, head_path, lock_path = _state_paths(self)
+    with _exclusive_file_lock(lock_path):
+        _atomic_replace(self, head_path, (tips[0] + "\n").encode("ascii"))
+    return tips[0]
+
+AstraRepository.operation_head = operation_head
+AstraRepository.current_view = current_view
+AstraRepository.publish_view = publish_view
+AstraRepository.update_view = update_view
+AstraRepository.recover_operation_head = recover_operation_head
+AstraRepository.metadata_root = property(lambda self: self.meta)

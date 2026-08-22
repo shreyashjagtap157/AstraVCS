@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0 - Local VCS Core
+
+- Added schema-v1 Trees with normalized executable/file/symlink modes while preserving v0 identity and decoding.
+- Added canonical Revision author/committer attribution in schema v1.
+- Added durable operation-head compare-and-swap state, immutable repository Views, and unique-tip recovery.
+- Added local workspace identity tracking, status, commit, explicit NodeID-preserving moves, and history verification.
+- Added crash-journaled checkout with dirty-worktree and stale-head protection.
+- Added structural Git import and strict direct Git export with exact commit-OID round-trip checks for representable histories.
+- Added NodeID-aware three-way merge preview, persisted first-class conflicts, clean merge application, and fast-forward support.
+- Preserved all bootstrap v0 canonical identity and codec vectors.
+
+
 All notable project changes are recorded here.
 
 ## [Unreleased]

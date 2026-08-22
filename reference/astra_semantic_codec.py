@@ -12,6 +12,7 @@ from typing import Callable
 
 from astra_codec import ObjectEnvelope, ObjectType
 from astra_model import (
+    Attribution,
     ChangeVersion,
     Conflict,
     NodeEntry,
@@ -134,11 +135,16 @@ def object_type_for(value: object) -> ObjectType:
 def _encode_tree(tree: Tree) -> bytes:
     tree.validate()
     kind_codes = {"file": 1, "directory": 2, "symlink": 3}
-    payload = bytearray(_u32(len(tree.entries)))
+    payload = bytearray()
+    if tree.schema_version == 1:
+        payload += b"\x01"
+    payload += _u32(len(tree.entries))
     for path, entry in tree.entries:
         payload += _blob(path)
         payload += _nid(entry.node_id)
         payload += bytes((kind_codes[entry.kind],))
+        if tree.schema_version == 1:
+            payload += entry.normalized_mode.to_bytes(4, "big")
         if entry.content_id is None:
             payload += b"\x00"
         else:
@@ -151,7 +157,12 @@ def _encode_tree(tree: Tree) -> bytes:
 
 
 def _decode_tree(payload: bytes) -> Tree:
+    # v0 starts with a u32 count. Given MAX_COLLECTION_ITEMS < 2^24 the
+    # first byte is always zero, so 0x01 is an unambiguous v1 discriminator.
+    schema_version = 1 if payload[:1] == b"\x01" else 0
     reader = _Reader(payload)
+    if schema_version == 1:
+        reader.take(1)
     entries: dict[bytes, NodeEntry] = {}
     kinds = {1: "file", 2: "directory", 3: "symlink"}
     count = reader.count()
@@ -166,6 +177,7 @@ def _decode_tree(payload: bytes) -> Tree:
         kind_code = reader.u8()
         if kind_code not in kinds:
             raise SemanticCodecError(f"unknown node kind code: {kind_code}")
+        mode = int.from_bytes(reader.take(4), "big") if schema_version == 1 else None
         content_marker = reader.u8()
         if content_marker not in (0, 1):
             raise SemanticCodecError("invalid content optional marker")
@@ -176,10 +188,10 @@ def _decode_tree(payload: bytes) -> Tree:
         derived = reader.take(16).hex() if derived_marker else None
         if path in entries:
             raise SemanticCodecError("duplicate tree path")
-        entries[path] = NodeEntry(node_id, kinds[kind_code], content, derived)
+        entries[path] = NodeEntry(node_id, kinds[kind_code], content, derived, mode)
     reader.finish()
     try:
-        return Tree.from_dict(entries)
+        return Tree.from_dict(entries, schema_version)
     except ValueError as exc:
         raise SemanticCodecError(str(exc)) from exc
 
@@ -210,9 +222,30 @@ def _decode_change(payload: bytes) -> ChangeVersion:
     return value
 
 
+def _encode_attribution(value: Attribution) -> bytes:
+    value.validate()
+    return (_blob(value.name) + _blob(value.email)
+            + value.timestamp.to_bytes(8, "big", signed=True)
+            + value.timezone_minutes.to_bytes(2, "big", signed=True))
+
+
+def _decode_attribution(reader: _Reader) -> Attribution:
+    value = Attribution(reader.blob(), reader.blob(),
+                        int.from_bytes(reader.take(8), "big", signed=True),
+                        int.from_bytes(reader.take(2), "big", signed=True))
+    try:
+        value.validate()
+    except ValueError as exc:
+        raise SemanticCodecError(str(exc)) from exc
+    return value
+
+
 def _encode_revision(value: Revision) -> bytes:
     value.validate()
-    payload = bytearray(_u32(len(value.parents)))
+    payload = bytearray()
+    if value.schema_version == 1:
+        payload += b"\x01"
+    payload += _u32(len(value.parents))
     for parent in value.parents:
         payload += _oid(parent, "parent")
     payload += _oid(value.tree_id, "TreeID")
@@ -220,19 +253,27 @@ def _encode_revision(value: Revision) -> bytes:
         payload += b"\x00"
     else:
         payload += b"\x01" + _oid(value.change_version_id, "ChangeVersionID")
+    if value.schema_version == 1:
+        payload += _encode_attribution(value.author)
+        payload += _encode_attribution(value.committer)
     return bytes(payload)
 
 
 def _decode_revision(payload: bytes) -> Revision:
+    schema_version = 1 if payload[:1] == b"\x01" else 0
     reader = _Reader(payload)
+    if schema_version == 1:
+        reader.take(1)
     parents = tuple(reader.take(32).hex() for _ in range(reader.count()))
     tree_id = reader.take(32).hex()
     marker = reader.u8()
     if marker not in (0, 1):
         raise SemanticCodecError("invalid ChangeVersion optional marker")
     cv = reader.take(32).hex() if marker else None
+    author = _decode_attribution(reader) if schema_version == 1 else None
+    committer = _decode_attribution(reader) if schema_version == 1 else None
     reader.finish()
-    value = Revision(parents, tree_id, cv)
+    value = Revision(parents, tree_id, cv, schema_version, author, committer)
     try:
         value.validate()
     except ValueError as exc:
