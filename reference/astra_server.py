@@ -3,7 +3,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs
-import json,re,threading,tempfile
+import json,re,threading,tempfile,uuid
 from astra_codec import ObjectType
 from astra_model import RepositoryView,validate_object_id
 from astra_repository import AstraRepository
@@ -30,10 +30,13 @@ class RepositoryRegistry:
  def list(self):return sorted(p.name for p in self.root.iterdir() if (p/'.astra').is_dir())
 
 class AstraServer:
- def __init__(self,root,policies=None,registry=None,tokens=None,platform=None):
-  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=WorkspaceManifestStore(self.root/'workspaces');self.packages=PackageRegistry(self.root/'packages');self.agent_jobs=AgentJobStore(self.root/'agents.sqlite');self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+ def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,worker_id=None):
+  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
+  self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=workspaces or WorkspaceManifestStore(self.root/'workspaces');self.packages=packages or PackageRegistry(self.root/'packages');self.agent_jobs=agent_jobs or AgentJobStore(self.root/'agents.sqlite')
+  self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
+  self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
  def run_agent_job(self,jid,runtime,*,target_ref='refs/heads/main',production=True):
-  return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production)
+  return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production,worker_id=self.worker_id)
  def serve(self,host='127.0.0.1',port=0):
   outer=self
   class Handler(BaseHTTPRequestHandler):
@@ -155,4 +158,5 @@ class AstraServer:
   if self.http:self.http.shutdown();self.http.server_close();self.thread.join(timeout=5)
   if self._owns_tokens:self.tokens.close()
   if self._owns_platform:self.platform.close()
-  self.packages.close();self.agent_jobs.close()
+  if self._owns_packages:self.packages.close()
+  if self._owns_agent_jobs:self.agent_jobs.close()

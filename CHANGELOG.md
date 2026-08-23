@@ -1,3 +1,13 @@
+## 0.15.0 - Multi-Node Control Plane and Agent Lease Failover
+
+- Added backward-compatible agent job schema migration with worker identity, lease expiry, heartbeat, attempt counters, and expired-lease reclamation.
+- Stale workers can no longer complete jobs after another node reclaims an expired lease.
+- Added injectable package, workspace, and agent stores to the hosted server with explicit ownership/close semantics.
+- Added stable server worker identities and lease-aware hosted agent execution.
+- Added two-node HTTP conformance using independent SQLite connections/store instances over shared backing paths for auth, collaboration, agent jobs, packages, workspaces, and repositories.
+- Kept production Kubernetes single-replica: shared-file SQLite conformance is not represented as production HA.
+- Full available qualification passes at 154 Python tests plus TypeScript, Go, Java, version, whitespace, and benchmark gates; Rust remains deferred where the toolchain is unavailable.
+
 # Changelog
 
 ## 0.14.0 - Agent-Native Collaboration and Client Bridge

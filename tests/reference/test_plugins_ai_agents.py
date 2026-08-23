@@ -1,3 +1,4 @@
+import time
 import json,sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'reference'))
@@ -98,3 +99,27 @@ class AgentCoordinatorTests(unittest.TestCase):
     row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(run));payload=json.loads(row['result'])
     self.assertEqual(row['status'],'needs_rebase');self.assertIn('revision',payload);self.assertEqual(platform.list_proposals('r'),[])
    finally:jobs.close();platform.close()
+
+class AgentLeaseFailoverTests(unittest.TestCase):
+ def test_live_lease_cannot_be_stolen_and_heartbeat_extends_it(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   path=Path(td)/'j.db';a=AgentJobStore(path);b=AgentJobStore(path)
+   try:
+    jid=a.create(AgentSpec('r','11'*32,'t',('repo.read',)))
+    row=a.claim(jid,worker_id='worker-a',lease_seconds=30);self.assertEqual(row['worker_id'],'worker-a');self.assertEqual(row['attempts'],1)
+    old=row['lease_until'];hb=a.heartbeat(jid,'worker-a',lease_seconds=60);self.assertGreaterEqual(hb['lease_until'],old)
+    with self.assertRaisesRegex(AgentError,'not queued or reclaimable'):b.claim(jid,worker_id='worker-b',lease_seconds=30)
+   finally:a.close();b.close()
+ def test_expired_lease_reclaims_and_stale_worker_cannot_finish(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   path=Path(td)/'j.db';a=AgentJobStore(path);b=AgentJobStore(path)
+   try:
+    jid=a.create(AgentSpec('r','11'*32,'t',('repo.read',)))
+    a.claim(jid,worker_id='worker-a',lease_seconds=1)
+    a.db.execute('UPDATE jobs SET lease_until=? WHERE id=?',(int(time.time())-1,jid));a.db.commit()
+    row=b.claim(jid,worker_id='worker-b',lease_seconds=30);self.assertEqual(row['worker_id'],'worker-b');self.assertEqual(row['attempts'],2)
+    with self.assertRaisesRegex(AgentError,'not owned'):a.finish(jid,'completed',{'old':True},worker_id='worker-a')
+    final=b.finish(jid,'completed',{'new':True},worker_id='worker-b');self.assertEqual(final['status'],'completed');self.assertIsNone(final['worker_id'])
+   finally:a.close();b.close()
