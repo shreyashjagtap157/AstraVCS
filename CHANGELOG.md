@@ -1,3 +1,12 @@
+## 0.23.0 - Generalized Common-Base Operation Reconciliation
+
+- Extended operation reconciliation from two tips to any number of divergent tips sharing a unique common operation ancestor.
+- N-way ref/workspace merge accepts only one distinct non-base value per name; multiple concurrent values remain explicit conflicts.
+- Multi-tip conflict records carry every parent operation and can be resolved through the existing explicit resolution path.
+- Disconnected/no-common-base multi-tip histories and ambiguous common bases remain fail-closed.
+- Added regression coverage for three-tip clean convergence, three-tip explicit conflict resolution, and disconnected-tip refusal.
+- Full executable regression passes at 176 Python tests before release qualification.
+
 ## 0.22.0 - Operation Reconciliation Resolution
 
 - Added explicit resolution of persisted two-tip operation reconciliation conflicts.

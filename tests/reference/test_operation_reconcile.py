@@ -29,13 +29,14 @@ class OperationReconcileTests(unittest.TestCase):
             _,l,_=self._diverge(r, RepositoryView.create({b'main':OID_B},{b'default':OID_A}), RepositoryView.create({b'main':OID_C},{b'default':OID_A}))
             before=r.operation_head(); res=r.reconcile_operation_heads(); self.assertFalse(res.merged); self.assertEqual(r.operation_head(),before)
             doc=json.loads(Path(res.conflict_path).read_text()); self.assertEqual(doc['conflicts'][0]['kind'],'ref'); self.assertEqual(doc['conflicts'][0]['name_hex'],b'main'.hex())
-    def test_three_tips_fail_closed(self):
+    def test_three_disconnected_tips_fail_closed(self):
         with tempfile.TemporaryDirectory() as td:
-            r=AstraRepository.init(td); base=RepositoryView.create({b'main':OID_A}); r.put(base); b=Operation((),base.view_id,b'base'); r.put(b)
+            r=AstraRepository.init(td)
             from astra_repository import _atomic_replace
-            _atomic_replace(r,r.metadata_root/'state'/'operation-head',(b.operation_id+'\n').encode())
+            tips=[]
             for i,oid in enumerate((OID_A,OID_B,OID_C)):
-                v=RepositoryView.create({b'main':oid,b'x'+bytes([48+i]):oid}); r.put(v); r.put(Operation((b.operation_id,),v.view_id,b'x'+bytes([48+i])))
+                v=RepositoryView.create({b'main':oid,b'x'+bytes([48+i]):oid}); r.put(v); op=Operation((),v.view_id,b'x'+bytes([48+i])); r.put(op); tips.append(op.operation_id)
+            _atomic_replace(r,r.metadata_root/'state'/'operation-head',(tips[0]+'\n').encode())
             with self.assertRaises(StateCorruptionError): r.reconcile_operation_heads()
 if __name__=='__main__': unittest.main()
 
@@ -64,3 +65,24 @@ class OperationReconcileResolutionTests(OperationReconcileTests):
             # Publish unrelated state to move the head away from both recorded tips.
             current=r.operation_head(); view=r.current_view(); r.publish_view(view,b'unrelated',expected_head=current)
             with self.assertRaises(Exception): r.resolve_operation_reconcile({('ref',b'main'):OID_B})
+
+class MultiTipOperationReconcileTests(unittest.TestCase):
+    def _make(self,repo,changes):
+        basev=RepositoryView.create({b'main':OID_A},{b'default':OID_A});repo.put(basev);base=Operation((),basev.view_id,b'base');repo.put(base)
+        from astra_repository import _atomic_replace
+        _atomic_replace(repo,repo.metadata_root/'state'/'operation-head',(base.operation_id+'\n').encode())
+        tips=[]
+        for i,(refs,ws) in enumerate(changes):
+            v=RepositoryView.create(refs,ws);repo.put(v);op=Operation((base.operation_id,),v.view_id,f'tip{i}'.encode());repo.put(op);tips.append(op.operation_id)
+        _atomic_replace(repo,repo.metadata_root/'state'/'operation-head',(tips[0]+'\n').encode());return base,tips
+    def test_three_disjoint_tips_merge(self):
+        with tempfile.TemporaryDirectory() as td:
+            r=AstraRepository.init(td);_,tips=self._make(r,[({b'main':OID_B},{b'default':OID_A}),({b'main':OID_A,b'release':OID_C},{b'default':OID_A}),({b'main':OID_A},{b'default':OID_C})])
+            out=r.reconcile_operation_heads();self.assertTrue(out.merged);v=r.current_view();self.assertEqual(dict(v.refs),{b'main':OID_B,b'release':OID_C});self.assertEqual(dict(v.workspace_heads)[b'default'],OID_C)
+            op=r.get(__import__('astra_codec').ObjectType.OPERATION,out.operation_id);self.assertEqual(set(op.parents),set(tips))
+    def test_three_tip_same_name_conflict_can_be_resolved(self):
+        with tempfile.TemporaryDirectory() as td:
+            r=AstraRepository.init(td);_,tips=self._make(r,[({b'main':OID_B},{b'default':OID_A}),({b'main':OID_C},{b'default':OID_A}),({b'main':OID_A},{b'default':OID_C})])
+            pending=r.reconcile_operation_heads();self.assertIsNotNone(pending.conflict_path)
+            out=r.resolve_operation_reconcile({('ref',b'main'):OID_C});self.assertTrue(out.merged);self.assertEqual(dict(r.current_view().refs)[b'main'],OID_C)
+            op=r.get(__import__('astra_codec').ObjectType.OPERATION,out.operation_id);self.assertEqual(set(op.parents),set(tips))

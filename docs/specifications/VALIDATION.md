@@ -72,4 +72,4 @@ publish(view, command, expected_head)
 
 Publication succeeds only if `expected_head == current_head`. A stale writer receives an explicit stale-head error and must not overwrite the newer repository operation.
 
-A divergent operation may be recorded from an existing parent without moving the current head. AstraVCS can deterministically reconcile exactly two divergent tips when their ref/workspace edits are three-way compatible. Incompatible same-name edits persist a local reconciliation-conflict record and do not move the head. Three-or-more tips remain fail-closed pending a separately qualified generalized reconciliation algorithm.
+A divergent operation may be recorded from an existing parent without moving the current head. AstraVCS deterministically reconciles N divergent tips when they share a unique common operation ancestor and each ref/workspace name has at most one distinct non-base value. Incompatible same-name edits persist a local reconciliation-conflict record and do not move the head. Disconnected or ambiguous multi-tip histories remain fail-closed.

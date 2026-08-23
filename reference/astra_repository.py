@@ -712,3 +712,108 @@ def resolve_operation_reconcile(self: AstraRepository, resolutions: dict[tuple[s
         return OperationReconcileResult(op.operation_id, True)
 
 AstraRepository.resolve_operation_reconcile = resolve_operation_reconcile
+
+# --- Generalized common-base operation reconciliation (v0.23 extension) ---
+def _operation_common_base(operations: dict[str, Operation], tips: list[str]) -> str | None:
+    if not tips: return None
+    ancestor_maps=[_operation_ancestors(operations,t) for t in tips]
+    common=set(ancestor_maps[0])
+    for m in ancestor_maps[1:]: common &= set(m)
+    if not common: return None
+    def score(oid):
+        ds=[m[oid] for m in ancestor_maps]; return (max(ds),sum(ds),oid)
+    ranked=sorted(common,key=score); best=ranked[0]; numeric=score(best)[:2]
+    if sum(1 for oid in ranked if score(oid)[:2]==numeric)>1:
+        raise StateCorruptionError('ambiguous operation merge base')
+    return best
+
+
+def _merge_many_view_map(base_items, tip_items: list[tuple[tuple[bytes,str],...]], label: str, tip_ids: list[str]):
+    base=dict(base_items); tips=[dict(items) for items in tip_items]; missing=object(); merged={}; conflicts=[]
+    names=set(base)
+    for t in tips:names.update(t)
+    for name in sorted(names):
+        b=base.get(name,missing); vals=[t.get(name,missing) for t in tips]
+        if all(v==vals[0] for v in vals): chosen=vals[0]
+        else:
+            changed=[]
+            for v in vals:
+                if v!=b and all(v!=x for x in changed): changed.append(v)
+            if len(changed)<=1: chosen=changed[0] if changed else b
+            else:
+                conflicts.append({'kind':label,'name_hex':name.hex(),'base':None if b is missing else b,
+                                  'values':[{'operation':tip_ids[i],'value':None if v is missing else v} for i,v in enumerate(vals)]})
+                continue
+        if chosen is not missing: merged[name]=chosen
+    return merged,conflicts
+
+
+def _write_reconcile_conflict_many(self: AstraRepository, parents: list[str], base: str | None, conflicts: list[dict]) -> str:
+    state,_head,_lock=_state_paths(self);path=state/'operation-reconcile-conflict.json'
+    payload=json.dumps({'version':2,'parents':parents,'base':base,'conflicts':conflicts},sort_keys=True,separators=(',',':')).encode()+b'\n'
+    _atomic_replace(self,path,payload);return str(path)
+
+
+def reconcile_operation_heads_many(self: AstraRepository) -> OperationReconcileResult:
+    _ensure_state(self);state,head_path,lock_path=_state_paths(self)
+    with _exclusive_file_lock(lock_path):
+        operations,tips=_operation_graph(self)
+        if not tips:return OperationReconcileResult(None,False)
+        if len(tips)==1:
+            current=operation_head(self)
+            if current!=tips[0]:_atomic_replace(self,head_path,(tips[0]+'\n').encode())
+            return OperationReconcileResult(tips[0],False)
+        base_id=_operation_common_base(operations,tips)
+        if len(tips)>2 and base_id is None:
+            raise StateCorruptionError('multi-tip operation reconciliation requires a common ancestor')
+        base_view=RepositoryView.create() if base_id is None else self.get(ObjectType.VIEW,operations[base_id].view_id)
+        views=[self.get(ObjectType.VIEW,operations[t].view_id) for t in tips]
+        refs,rc=_merge_many_view_map(base_view.refs,[v.refs for v in views],'ref',tips)
+        workspaces,wc=_merge_many_view_map(base_view.workspace_heads,[v.workspace_heads for v in views],'workspace',tips)
+        conflicts=rc+wc;conflict_file=state/'operation-reconcile-conflict.json'
+        if conflicts:return OperationReconcileResult(None,False,_write_reconcile_conflict_many(self,tips,base_id,conflicts))
+        merged=RepositoryView.create(refs,workspaces);self.put(merged)
+        op=Operation(tuple(tips),merged.view_id,b'reconcile-operation-heads');self.put(op)
+        _atomic_replace(self,head_path,(op.operation_id+'\n').encode())
+        if conflict_file.exists():conflict_file.unlink();self._fsync_dir(conflict_file.parent)
+        return OperationReconcileResult(op.operation_id,True)
+
+
+def resolve_operation_reconcile_many(self: AstraRepository, resolutions: dict[tuple[str,bytes],str|None]) -> OperationReconcileResult:
+    _ensure_state(self);state,head_path,lock_path=_state_paths(self);conflict_file=state/'operation-reconcile-conflict.json'
+    with _exclusive_file_lock(lock_path):
+        if not conflict_file.exists():raise StateCorruptionError('no operation reconciliation conflict is pending')
+        try:
+            doc=json.loads(conflict_file.read_text());parents=doc.get('parents') or [doc['left'],doc['right']];base_id=doc.get('base');rows=doc['conflicts']
+            if len(parents)<2:raise ValueError
+            for p in parents:validate_object_id(p,'reconciliation parent')
+            if base_id is not None:validate_object_id(base_id,'base operation')
+        except Exception as exc:raise StateCorruptionError('malformed operation reconciliation conflict record') from exc
+        current=operation_head(self)
+        if current not in parents:raise StaleOperationHeadError(f'operation head moved since reconciliation conflict: {current!r}')
+        operations,_=_operation_graph(self)
+        if any(p not in operations for p in parents):raise StateCorruptionError('reconciliation parent operation is missing')
+        base_view=RepositoryView.create() if base_id is None else self.get(ObjectType.VIEW,operations[base_id].view_id)
+        views=[self.get(ObjectType.VIEW,operations[p].view_id) for p in parents]
+        refs,_=_merge_many_view_map(base_view.refs,[v.refs for v in views],'ref',parents)
+        workspaces,_=_merge_many_view_map(base_view.workspace_heads,[v.workspace_heads for v in views],'workspace',parents)
+        expected=set()
+        for row in rows:
+            kind=row.get('kind')
+            if kind not in ('ref','workspace'):raise StateCorruptionError('unknown reconciliation conflict kind')
+            try:name=bytes.fromhex(row['name_hex'])
+            except Exception as exc:raise StateCorruptionError('malformed reconciliation conflict name') from exc
+            expected.add((kind,name))
+        if set(resolutions)!=expected:raise StateCorruptionError(f'reconciliation resolutions must exactly cover conflicts; missing={len(expected-set(resolutions))} extra={len(set(resolutions)-expected)}')
+        for (kind,name),oid in resolutions.items():
+            validate_name(name,f'{kind} name')
+            if oid is not None:validate_object_id(oid,f'{kind} resolution')
+            target=refs if kind=='ref' else workspaces
+            if oid is None:target.pop(name,None)
+            else:target[name]=oid
+        merged=RepositoryView.create(refs,workspaces);self.put(merged);op=Operation(tuple(sorted(parents)),merged.view_id,b'resolve-operation-reconcile');self.put(op)
+        _atomic_replace(self,head_path,(op.operation_id+'\n').encode());conflict_file.unlink();self._fsync_dir(conflict_file.parent)
+        return OperationReconcileResult(op.operation_id,True)
+
+AstraRepository.reconcile_operation_heads = reconcile_operation_heads_many
+AstraRepository.resolve_operation_reconcile = resolve_operation_reconcile_many
