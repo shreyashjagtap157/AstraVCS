@@ -123,3 +123,21 @@ class AgentLeaseFailoverTests(unittest.TestCase):
     with self.assertRaisesRegex(AgentError,'not owned'):a.finish(jid,'completed',{'old':True},worker_id='worker-a')
     final=b.finish(jid,'completed',{'new':True},worker_id='worker-b');self.assertEqual(final['status'],'completed');self.assertIsNone(final['worker_id'])
    finally:a.close();b.close()
+
+class DaemonWorkflowTests(unittest.TestCase):
+ def test_daemon_branch_switch_revision_and_search(self):
+  import urllib.request, urllib.parse, json, tempfile
+  from pathlib import Path
+  from astra_repository import AstraRepository
+  from astra_daemon import AstraDaemon
+  with tempfile.TemporaryDirectory() as td:
+   repo=AstraRepository.init(td);Path(td,'a.txt').write_text('needle one');d=AstraDaemon(repo);host,port=d.serve();base=f'http://{host}:{port}';headers={'Authorization':'Bearer '+d.token,'Content-Type':'application/json'}
+   def req(path,body=None):
+    data=None if body is None else json.dumps(body).encode()
+    with urllib.request.urlopen(urllib.request.Request(base+path,data=data,headers=headers)) as response:return json.loads(response.read())
+   try:
+    rev=req('/v1/commit',{'message':'first'})['revision'];self.assertEqual(req('/v1/revisions/'+rev)['revision'],rev)
+    req('/v1/branches',{'name':'feature','revision':rev});branches=req('/v1/branches');self.assertEqual(branches['branches'][0]['name'],'feature')
+    req('/v1/switch',{'name':'feature'});self.assertTrue(req('/v1/branches')['current'].endswith('feature'))
+    hits=req('/v1/search?'+urllib.parse.urlencode({'q':'needle'}))['hits'];self.assertEqual(len(hits),1)
+   finally:d.close()

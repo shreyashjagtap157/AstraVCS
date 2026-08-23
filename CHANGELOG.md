@@ -1,3 +1,12 @@
+## 0.24.0 - Native/Web Repository Workflow Surface
+
+- Expanded authenticated local daemon APIs with branch listing/create/delete, branch switching, detached checkout, revision lookup, and local code search.
+- Expanded the desktop TypeScript daemon client with typed status/history/branch/revision/search/checkout operations while keeping VCS semantics in the daemon/core.
+- Expanded the shared web API client with typed revision, search, issues/comments, packages, and event APIs.
+- Web/Tauri surface now displays repository issues and code-search results alongside refs/proposals/agent jobs.
+- Added daemon workflow regression coverage for commit, branch creation/switch, revision lookup, and search.
+- Full executable regression passes at 177 Python tests plus web/desktop/SDK TypeScript and Go gates.
+
 ## 0.23.0 - Generalized Common-Base Operation Reconciliation
 
 - Extended operation reconciliation from two tips to any number of divergent tips sharing a unique common operation ancestor.
