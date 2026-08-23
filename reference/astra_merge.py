@@ -128,3 +128,87 @@ class MergeEngine:
         oid=self.create_merge_revision(left,right,author=author)
         workspace.checkout(oid,ref=workspace.current_ref(),expected_current_revision=left)
         return oid
+
+# Durable conflicted-merge workflow. The merge state is workspace-local
+# recovery metadata; canonical Conflict/Tree/Revision objects remain repository
+# truth.
+def _merge_state_path(workspace:LocalWorkspace):
+    return workspace.meta/'merge-state.json'
+
+def begin_conflicted_merge(self:MergeEngine,workspace:LocalWorkspace,right:str):
+    import json
+    from astra_repository import _atomic_replace
+    path=_merge_state_path(workspace)
+    if path.exists():raise MergeError('a merge is already in progress')
+    left=workspace.head()
+    if left is None:raise MergeError('workspace has no current revision')
+    preview=self.preview(left,right)
+    if not preview.conflicts:return self.apply(workspace,right)
+    self.repo.put(preview.partial_tree)
+    state={'version':1,'base':preview.base_revision,'left':left,'right':right,
+           'partial_tree':preview.partial_tree.tree_id,'conflicts':list(preview.conflicts),'resolutions':{}}
+    _atomic_replace(self.repo,path,(json.dumps(state,sort_keys=True,separators=(',',':'))+'\n').encode())
+    return tuple(preview.conflicts)
+
+def _read_merge_state(self:MergeEngine,workspace:LocalWorkspace):
+    import json
+    path=_merge_state_path(workspace)
+    if not path.exists():raise MergeError('no merge is in progress')
+    try:state=json.loads(path.read_text(encoding='utf-8'))
+    except Exception as exc:raise MergeError('corrupt merge state') from exc
+    if state.get('version')!=1 or not all(k in state for k in ('base','left','right','partial_tree','conflicts','resolutions')):
+        raise MergeError('invalid merge state')
+    return state
+
+def resolve_conflict(self:MergeEngine,workspace:LocalWorkspace,conflict_id:str,*,path:bytes|None=None,data:bytes|None=None,delete=False,kind='file',mode=None):
+    import json
+    from astra_model import MODE_FILE,validate_path
+    from astra_repository import _atomic_replace
+    state=_read_merge_state(self,workspace)
+    if conflict_id not in state['conflicts']:raise MergeError('conflict is not part of active merge')
+    conflict=self.repo.get(ObjectType.CONFLICT,conflict_id)
+    if len(conflict.affected_nodes)!=1:raise MergeError('bootstrap resolver requires one affected NodeID')
+    node=conflict.affected_nodes[0]
+    if delete:
+        resolution={'action':'delete','node_id':node}
+    else:
+        if path is None or data is None:raise MergeError('resolution path and content are required')
+        validate_path(path);cid=self.repo.put_content(data).semantic_id
+        resolution={'action':'entry','node_id':node,'path':path.hex(),'content_id':cid,'kind':kind,'mode':MODE_FILE if mode is None else int(mode)}
+    state['resolutions'][conflict_id]=resolution
+    _atomic_replace(self.repo,_merge_state_path(workspace),(json.dumps(state,sort_keys=True,separators=(',',':'))+'\n').encode())
+
+def continue_conflicted_merge(self:MergeEngine,workspace:LocalWorkspace,*,author:Attribution|None=None,message:bytes=b'Merge resolution'):
+    from astra_model import MODE_FILE
+    state=_read_merge_state(self,workspace)
+    if workspace.head()!=state['left']:raise MergeError('workspace head changed since merge began')
+    missing=[c for c in state['conflicts'] if c not in state['resolutions']]
+    if missing:raise MergeError(f'{len(missing)} conflicts remain unresolved')
+    partial=self.repo.get(ObjectType.TREE,state['partial_tree']);entries=partial.as_dict()
+    for cid in state['conflicts']:
+        r=state['resolutions'][cid];node=r['node_id']
+        # Remove any partial entry for the same node before applying resolution.
+        for p,e in list(entries.items()):
+            if e.node_id==node:del entries[p]
+        if r['action']=='delete':continue
+        path=bytes.fromhex(r['path'])
+        if path in entries and entries[path].node_id!=node:raise MergeError('resolution creates path collision')
+        entries[path]=NodeEntry(node,r['kind'],r['content_id'],None,int(r.get('mode',MODE_FILE)))
+    tree=Tree.from_dict(entries,1);self.repo.put(tree)
+    left_rev=self.repo.get(ObjectType.REVISION,state['left'])
+    cv=ChangeVersion(logical_id(),message,left_rev.tree_id,tree.tree_id);self.repo.put(cv)
+    now=int(time.time());a=author or Attribution(b'Astra User',b'unknown@local',now,0)
+    rev=Revision((state['left'],state['right']),tree.tree_id,cv.version_id,1,a,a);self.repo.put(rev)
+    workspace.checkout(rev.revision_id,ref=workspace.current_ref(),expected_current_revision=state['left'])
+    _merge_state_path(workspace).unlink(missing_ok=True);self.repo._fsync_dir(workspace.meta)
+    return rev.revision_id
+
+def abort_conflicted_merge(self:MergeEngine,workspace:LocalWorkspace):
+    path=_merge_state_path(workspace)
+    if not path.exists():return False
+    path.unlink();self.repo._fsync_dir(workspace.meta);return True
+
+MergeEngine.begin=begin_conflicted_merge
+MergeEngine.resolve=resolve_conflict
+MergeEngine.continue_merge=continue_conflicted_merge
+MergeEngine.abort=abort_conflicted_merge

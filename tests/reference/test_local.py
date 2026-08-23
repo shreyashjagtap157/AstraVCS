@@ -4,7 +4,7 @@ ROOT=Path(__file__).resolve().parents[2]; sys.path.insert(0,str(ROOT/'reference'
 from astra_codec import ObjectType
 from astra_model import Attribution, MODE_EXECUTABLE, MODE_FILE
 from astra_repository import AstraRepository, StateCorruptionError
-from astra_local import LocalWorkspace, DirtyWorktreeError, NothingToCommitError, verify_revision_links, walk_history
+from astra_local import LocalWorkspace, WorktreeError, DirtyWorktreeError, NothingToCommitError, verify_revision_links, walk_history
 
 class LocalTests(unittest.TestCase):
     def test_initial_commit_status_history_and_fsck(self):
@@ -62,3 +62,36 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(repo.recover_operation_head(),head)
 
 if __name__=='__main__': unittest.main()
+
+class SparseWorkspaceTests(unittest.TestCase):
+    def test_sparse_status_and_commit_preserve_unmaterialized_paths(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td); repo=AstraRepository.init(root); ws=LocalWorkspace(repo)
+            (root/'src').mkdir(); (root/'docs').mkdir()
+            (root/'src'/'a.txt').write_text('a1'); (root/'docs'/'guide.txt').write_text('d1')
+            first=ws.commit(b'initial')
+            ws.set_sparse((b'src',)); ws.checkout(first.revision_id,ref=ws.current_ref(),force=True)
+            self.assertTrue((root/'src'/'a.txt').exists()); self.assertFalse((root/'docs'/'guide.txt').exists())
+            self.assertEqual(ws.status(),())
+            (root/'src'/'a.txt').write_text('a2')
+            second=ws.commit(b'sparse edit')
+            tree=repo.get(ObjectType.TREE,second.tree_id).as_dict()
+            self.assertIn(b'docs/guide.txt',tree); self.assertIn(b'src/a.txt',tree)
+            self.assertEqual(repo.get_content(tree[b'docs/guide.txt'].content_id),b'd1')
+
+    def test_checkout_preserves_untracked_files_and_rejects_collision(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td); repo=AstraRepository.init(root); ws=LocalWorkspace(repo)
+            (root/'tracked').write_text('one'); first=ws.commit(b'one')
+            (root/'tracked').write_text('two'); second=ws.commit(b'two')
+            (root/'notes.tmp').write_text('keep')
+            ws.checkout(first.revision_id,ref=None,force=True)
+            self.assertEqual((root/'notes.tmp').read_text(),'keep')
+            self.assertEqual((root/'tracked').read_text(),'one')
+
+            # A path that was never materialized/tracked locally is protected.
+            ws.set_sparse((b'other',)); ws.checkout(second.revision_id,ref=None,force=True)
+            (root/'tracked').write_text('untracked collision')
+            ws.clear_sparse()
+            with self.assertRaises(WorktreeError):
+                ws.checkout(second.revision_id,ref=None,force=True)

@@ -4,25 +4,13 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.0.6` — canonical semantic persistence and repository-integrity milestone.
+`v0.10.0` — recovery, sparse/lazy workspace, resumable synchronization, conflict-resolution, GC, and lease milestone.
 
-The repository currently contains:
+The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-- the corrected master implementation plan;
-- the refined semantic-core architecture;
-- a Python executable reference model used for semantic validation in environments where Rust is unavailable;
-- the initial Rust `astra-model` crate mirroring the reference semantics;
-- invariant tests for revision/change/node/operation behavior;
-- shared canonical identity vectors consumed by the Python and Rust models;
-- strict bootstrap object envelope and malformed-input rejection;
-- centralized semantic validation and stale operation-head detection;
-- first durable bootstrap loose-object CAS with corruption quarantine, scrub, and idempotent concurrent publication;
-- shared StoreKey and semantic-serialization compatibility vectors for Python/Rust implementations;
-- bootstrap `.astra` repository initialization and semantic-ID-to-StoreKey mapping;
-- repository-level `fsck` plus safe orphan-mapping recovery;
-- documented compatibility/validation cycle for all future changes.
+`v0.10.0` adds durable conflicted-merge continuation/abort, conservative reachability GC, transactional expiring leases for non-mergeable assets, sparse workspaces that preserve unmaterialized repository state and unrelated untracked files, transparent promised-content fetching with ContentID verification, and durable resumable sync sessions that publish refs only after the complete pinned transfer plan succeeds.
 
-No production VCS functionality is claimed yet.
+The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 
 ## Bootstrap strategy
 
@@ -32,6 +20,6 @@ Git is the bootstrap VCS. AstraVCS will not become self-hosting until repository
 
 Repository meaning is stable; storage, indexes, transports, UI frameworks, AI models, plugin runtimes, and server topology are replaceable implementation details.
 
-## Current persistence milestone
+## Current implementation milestone
 
-`v0.0.6` layers canonical bootstrap semantic serialization and repository persistence over the `v0.0.5` loose CAS. Semantic repository identities remain distinct from physical `StoreKey`; `.astra/semantic-map` connects the two, `fsck` verifies both layers, and safe orphan recovery handles interruption after CAS publication but before mapping publication. Packed/segment storage remains intentionally deferred until these semantics are stable.
+`v0.10.0` retains semantic IDs as repository authority while keeping storage, indexes, chunking, transports, workspace materialization, and sync-session state replaceable. Sparse/lazy workspaces and resumable synchronization deliberately operate through the same canonical Repository/Content APIs rather than creating alternate history semantics.

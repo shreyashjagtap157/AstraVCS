@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0 - Recovery, Sparse/Lazy Workspaces and Resumable Synchronization
+
+- Added durable conflicted-merge state, explicit NodeID-preserving resolution, continuation, stale-head protection, and abort.
+- Added conservative mark/quarantine/prune reachability GC with revalidation before deletion and shared-StoreKey safety.
+- Added transactional expiring ownership-token leases for non-mergeable assets.
+- Added sparse workspace profiles that carry unmaterialized tracked entries forward through status/commit.
+- Hardened checkout to remove only previously tracked paths and preserve unrelated untracked user data, including under forced checkout.
+- Routed checkout through transparent `get_content()` so native large content and promised content materialize through one verified path.
+- Added authenticated HTTP promised-content fetching with ContentID verification before persistence.
+- Added transport-neutral resumable sync capabilities, pinned transfer plans, atomically persisted cursors, filtered promised content, and refs published only after transfer completion.
+- Added regression coverage for sparse commits, untracked collision protection, resumable/interrupted sessions, tamper detection, malicious promisors, conflicted-merge recovery, GC, and leases.
+
 ## 0.9.0 - Durable Automation, Webhooks and Agent Isolation Contracts
 
 - Added durable CI job persistence and execution orchestration with production-isolation enforcement.
@@ -96,7 +108,7 @@ All notable project changes are recorded here.
 
 ## [Unreleased]
 
-No unreleased changes after the `v0.0.6` milestone.
+No unreleased changes after the `v0.10.0` milestone.
 
 ## [0.0.6] - 2026-08-20
 

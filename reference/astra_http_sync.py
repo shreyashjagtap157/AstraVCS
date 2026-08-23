@@ -20,3 +20,7 @@ class HTTPSyncClient:
   with tempfile.NamedTemporaryFile(suffix='.astra') as f:
    create_portable_bundle(source_repo,f.name);raw=Path(f.name).read_bytes()
   return json.loads(self._request('POST',f'/v1/repos/{repo_name}/bundle',raw,'application/vnd.astra.bundle'))
+
+class HTTPPromisor:
+ def __init__(self,base_url,token,repo_name):self.client=HTTPSyncClient(base_url,token);self.repo_name=repo_name
+ def __call__(self,content_id):return self.client._request('GET',f'/v1/repos/{self.repo_name}/content/{content_id}')

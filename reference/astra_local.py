@@ -48,6 +48,7 @@ class LocalWorkspace:
         self.current_ref_path=self.meta / "current-ref"
         self.lock_path=self.meta / "workspace.lock"
         self.journal_path=self.meta / "checkout-journal.json"
+        self.sparse_path=self.meta / "sparse.json"
         if not self.current_ref_path.exists(): _atomic_replace(repo,self.current_ref_path,DEFAULT_REF+b"\n")
 
     @contextmanager
@@ -78,6 +79,39 @@ class LocalWorkspace:
     def _save_index(self, index: dict[bytes,dict]):
         raw={k.hex():v for k,v in sorted(index.items())}
         _atomic_replace(self.repo,self.index_path,(json.dumps(raw,sort_keys=True,separators=(",",":"))+"\n").encode())
+
+    def sparse_prefixes(self) -> tuple[bytes,...]:
+        if not self.sparse_path.exists():
+            return ()
+        try:
+            raw=json.loads(self.sparse_path.read_text(encoding="utf-8"))
+            if raw.get("version") != 1 or not isinstance(raw.get("prefixes"), list):
+                raise ValueError
+            prefixes=tuple(bytes.fromhex(item) for item in raw["prefixes"])
+            from astra_model import validate_path
+            for prefix in prefixes:
+                validate_path(prefix)
+            return tuple(sorted(set(prefixes)))
+        except Exception as exc:
+            raise WorktreeError("corrupt sparse workspace profile") from exc
+
+    def set_sparse(self, prefixes: tuple[bytes,...]) -> None:
+        from astra_model import validate_path
+        normalized=[]
+        for prefix in prefixes:
+            prefix=prefix.rstrip(b"/")
+            validate_path(prefix)
+            normalized.append(prefix)
+        payload={"version":1,"prefixes":[p.hex() for p in sorted(set(normalized))]}
+        _atomic_replace(self.repo,self.sparse_path,(json.dumps(payload,sort_keys=True,separators=(",",":"))+"\n").encode())
+
+    def clear_sparse(self) -> None:
+        self.sparse_path.unlink(missing_ok=True)
+        self.repo._fsync_dir(self.sparse_path.parent)
+
+    def _selected(self, path: bytes) -> bool:
+        prefixes=self.sparse_prefixes()
+        return not prefixes or any(path==p or path.startswith(p+b"/") for p in prefixes)
 
     @staticmethod
     def _mode_for(path: bytes, kind: str) -> int:
@@ -112,11 +146,25 @@ class LocalWorkspace:
         return data
 
     def scan(self, *, persist_contents=False) -> tuple[Tree,dict[bytes,dict]]:
-        old=self._load_index(); entries={}; newindex={}
+        old=self._load_index(); base=self.base_tree().as_dict(); entries={}; newindex={}
+        # Sparse workspaces preserve unmaterialized tracked entries from the base
+        # Tree. They are repository state, not deletions merely because they are
+        # intentionally absent from this filesystem view.
+        for rel,entry in base.items():
+            if not self._selected(rel):
+                entries[rel]=entry
         for rel,absolute,kind in self._iter_files():
+            if not self._selected(rel):
+                continue
             data=self._stable_read(absolute,kind); cid=content_id(data)
             previous=old.get(rel)
-            node_id=previous["node_id"] if previous and previous.get("kind")==kind else logical_id()
+            base_entry=base.get(rel)
+            if previous and previous.get("kind")==kind:
+                node_id=previous["node_id"]
+            elif base_entry is not None and base_entry.kind==kind:
+                node_id=base_entry.node_id
+            else:
+                node_id=logical_id()
             mode=self._mode_for(absolute,kind)
             entry=NodeEntry(node_id,kind,cid,None,mode)
             entries[rel]=entry
@@ -175,27 +223,46 @@ class LocalWorkspace:
             index.update(moved); self._save_index(index)
 
     def _materialize_tree(self, tree: Tree):
-        # Remove all non-metadata content, deepest-first.
-        for rel,absolute,kind in sorted(self._iter_files(), key=lambda x:x[0], reverse=True):
-            try: os.unlink(absolute)
-            except IsADirectoryError: pass
-        # prune empty dirs
-        for root,dirs,files in os.walk(self.root,topdown=False):
-            p=Path(root)
-            if p==self.repo.meta or self.repo.meta in p.parents: continue
-            for d in dirs:
-                q=p/d
-                if q==self.repo.meta or self.repo.meta in q.parents: continue
-                try:q.rmdir()
-                except OSError:pass
+        old_index=self._load_index()
+        target_entries={p:e for p,e in tree.entries if self._selected(p)}
+
+        # Remove only files Astra previously materialized. Untracked files are
+        # never erased merely because checkout is forced or sparse.
+        for rel in sorted(old_index, key=lambda p:(p.count(b"/"),p), reverse=True):
+            target=self.root/os.fsdecode(rel)
+            if target.is_symlink() or target.is_file():
+                target.unlink(missing_ok=True)
+
+        # Refuse to overwrite unrelated untracked paths that collide with the
+        # target Tree. Force means discard tracked modifications, not arbitrary
+        # user data.
+        for rel in target_entries:
+            target=self.root/os.fsdecode(rel)
+            if (target.exists() or target.is_symlink()) and rel not in old_index:
+                raise WorktreeError(f"untracked path would be overwritten: {os.fsdecode(rel)}")
+
         index={}
-        for rel,entry in tree.entries:
+        for rel,entry in sorted(target_entries.items()):
             target=self.root/os.fsdecode(rel); target.parent.mkdir(parents=True,exist_ok=True)
-            data=b"" if entry.content_id is None else self.repo.get(ObjectType.CONTENT,entry.content_id)
-            if entry.kind=="symlink": os.symlink(data,target)
+            data=b"" if entry.content_id is None else self.repo.get_content(entry.content_id)
+            if entry.kind=="symlink":
+                os.symlink(data,target)
             elif entry.kind=="file":
                 target.write_bytes(data); os.chmod(target,0o755 if entry.normalized_mode==MODE_EXECUTABLE else 0o644)
             index[rel]={"node_id":entry.node_id,"kind":entry.kind,"mode":entry.normalized_mode}
+
+        # Prune directories made empty by tracked removals, while preserving any
+        # directory containing untracked user data.
+        for root,dirs,files in os.walk(self.root,topdown=False):
+            path=Path(root)
+            if path==self.repo.meta or self.repo.meta in path.parents:
+                continue
+            for d in dirs:
+                q=path/d
+                if q==self.repo.meta or self.repo.meta in q.parents:
+                    continue
+                try:q.rmdir()
+                except OSError:pass
         self._save_index(index)
 
     def checkout(self, revision_id: str, *, ref: bytes|None=None, force=False, expected_current_revision: str|None=None):

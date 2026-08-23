@@ -53,6 +53,8 @@ class AstraServer:
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
        oid=p[4];rev=repo.get(ObjectType.REVISION,oid);return self._json(200,{'revision':oid,'parents':list(rev.parents),'tree':rev.tree_id,'change_version':rev.change_version_id})
+      if len(p)==5 and p[3]=='content':
+       oid=p[4];validate_object_id(oid);raw=repo.get_content(oid);self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['bundle']:
        with tempfile.NamedTemporaryFile(suffix='.astra') as f:
         create_portable_bundle(repo,f.name);raw=Path(f.name).read_bytes()

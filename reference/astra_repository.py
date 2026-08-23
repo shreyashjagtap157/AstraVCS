@@ -508,3 +508,30 @@ def get_content(self: AstraRepository, content_oid: str) -> bytes:
 
 AstraRepository.put_content = put_content
 AstraRepository.get_content = get_content
+
+# Optional promised-content fetcher. The fetcher is transport/provider specific;
+# repository identity remains authoritative because returned bytes are verified
+# against the requested ContentID before persistence.
+def set_content_fetcher(self: AstraRepository, fetcher) -> None:
+    self._content_fetcher = fetcher
+
+_original_get_content = AstraRepository.get_content
+
+def get_content_with_promises(self: AstraRepository, content_oid: str) -> bytes:
+    from astra_promises import PromiseStore
+    from astra_semantic_codec import content_id
+    try:
+        return _original_get_content(self, content_oid)
+    except SemanticObjectNotFoundError:
+        promises=PromiseStore(self)
+        fetcher=getattr(self,'_content_fetcher',None)
+        if not promises.contains(content_oid) or fetcher is None:
+            raise
+        try:data=fetcher(content_oid)
+        except Exception as exc:raise SemanticMappingError(f'promised content fetch failed: {content_oid}') from exc
+        if not isinstance(data,(bytes,bytearray)) or content_id(bytes(data))!=content_oid:
+            raise SemanticMappingError('promisor returned bytes with wrong ContentID')
+        self.put_content(bytes(data));promises.remove(content_oid);return bytes(data)
+
+AstraRepository.set_content_fetcher = set_content_fetcher
+AstraRepository.get_content = get_content_with_promises
