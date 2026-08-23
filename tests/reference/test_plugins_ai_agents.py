@@ -141,3 +141,23 @@ class DaemonWorkflowTests(unittest.TestCase):
     req('/v1/switch',{'name':'feature'});self.assertTrue(req('/v1/branches')['current'].endswith('feature'))
     hits=req('/v1/search?'+urllib.parse.urlencode({'q':'needle'}))['hits'];self.assertEqual(len(hits),1)
    finally:d.close()
+
+class DaemonSessionSecurityTests(unittest.TestCase):
+ def test_session_descriptor_is_restricted_and_removed(self):
+  import json,os,tempfile
+  from astra_repository import AstraRepository
+  from astra_daemon import AstraDaemon
+  with tempfile.TemporaryDirectory() as td:
+   repo=AstraRepository.init(td);d=AstraDaemon(repo);host,port=d.serve()
+   try:
+    doc=json.loads(d.session_path.read_text());self.assertEqual(doc['token'],d.token);self.assertEqual(doc['url'],f'http://{host}:{port}')
+    if os.name!='nt':self.assertEqual(d.session_path.stat().st_mode & 0o777,0o600)
+   finally:d.close()
+   self.assertFalse(d.session_path.exists())
+ def test_non_loopback_bind_is_rejected(self):
+  import tempfile
+  from astra_repository import AstraRepository
+  from astra_daemon import AstraDaemon,DaemonError
+  with tempfile.TemporaryDirectory() as td:
+   d=AstraDaemon(AstraRepository.init(td))
+   with self.assertRaises(DaemonError):d.serve('0.0.0.0',0)

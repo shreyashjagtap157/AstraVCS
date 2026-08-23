@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.24.0`
+`v0.25.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.24.0` closes the common two-tip repository Operation divergence gap. Compatible ref/workspace edits reconcile deterministically into a two-parent Operation; incompatible edits persist a local reconciliation-conflict record and leave the current head unchanged. Three-or-more tips remain fail-closed until a generalized operation-merge design is qualified.
+`v0.25.0` closes the common two-tip repository Operation divergence gap. Compatible ref/workspace edits reconcile deterministically into a two-parent Operation; incompatible edits persist a local reconciliation-conflict record and leave the current head unchanged. Three-or-more tips remain fail-closed until a generalized operation-merge design is qualified.
 
 ## Validation available in this environment
 

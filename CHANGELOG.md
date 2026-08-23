@@ -1,3 +1,12 @@
+## 0.25.0 - Secure Native Daemon Discovery
+
+- Restricted the desktop/IDE local daemon to loopback-only bindings.
+- Added a durable short-lived `.astra/state/daemon-session.json` descriptor containing daemon URL, product version, process ID, and bearer token.
+- Session descriptors use owner-only `0600` permissions on POSIX and are removed durably on daemon shutdown.
+- Added `astra daemon` porcelain for native/IDE client bootstrap without CLI-output scraping for repository operations.
+- Added regression coverage for session descriptor lifecycle/permissions and non-loopback bind rejection.
+- Full executable regression passes at 179 Python tests before release qualification.
+
 ## 0.24.0 - Native/Web Repository Workflow Surface
 
 - Expanded authenticated local daemon APIs with branch listing/create/delete, branch switching, detached checkout, revision lookup, and local code search.

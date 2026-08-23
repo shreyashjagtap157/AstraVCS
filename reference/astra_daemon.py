@@ -1,14 +1,17 @@
 """Authenticated loopback daemon for desktop/IDE clients."""
 from __future__ import annotations
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-import json,secrets,threading
+import json,secrets,threading,os
+from pathlib import Path
+from astra_version import product_version
 from astra_local import LocalWorkspace,walk_history
 from astra_codec import ObjectType
 from astra_search import SearchIndex
 class DaemonError(RuntimeError):pass
 class AstraDaemon:
- def __init__(self,repo):self.repo=repo;self.workspace=LocalWorkspace(repo);self.token=secrets.token_urlsafe(32);self.http=None;self.thread=None
+ def __init__(self,repo):self.repo=repo;self.workspace=LocalWorkspace(repo);self.token=secrets.token_urlsafe(32);self.http=None;self.thread=None;self.session_path=repo.metadata_root/'state'/'daemon-session.json'
  def serve(self,host='127.0.0.1',port=0):
+  if host not in ('127.0.0.1','::1','localhost'): raise DaemonError('local daemon may bind only to loopback')
   outer=self
   class H(BaseHTTPRequestHandler):
    def log_message(self,*a):pass
@@ -56,6 +59,10 @@ class AstraDaemon:
      return self.sendj(404,{'error':'not_found'})
     except PermissionError as e:return self.sendj(403,{'error':str(e)})
     except Exception as e:return self.sendj(400,{'error':str(e)})
-  self.http=ThreadingHTTPServer((host,port),H);self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start();return self.http.server_address
+  self.http=ThreadingHTTPServer((host,port),H);self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start();addr=self.http.server_address
+  self.repo._mkdir_durable(self.session_path.parent);payload=(json.dumps({'version':1,'product_version':product_version(),'url':f'http://{addr[0]}:{addr[1]}','token':self.token,'pid':os.getpid()},sort_keys=True,separators=(',',':'))+'\n').encode();self.repo._write_file_durable(self.session_path,payload,exclusive=False)
+  if os.name!='nt': os.chmod(self.session_path,0o600)
+  self.repo._fsync_dir(self.session_path.parent);return addr
  def close(self):
   if self.http:self.http.shutdown();self.http.server_close();self.thread.join(timeout=5)
+  if self.session_path.exists():self.session_path.unlink();self.repo._fsync_dir(self.session_path.parent)

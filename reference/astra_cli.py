@@ -6,6 +6,7 @@ from astra_codec import ObjectType
 from astra_local import LocalWorkspace, discover, walk_history, verify_revision_links
 from astra_repository import AstraRepository
 from astra_change_ops import cherry_pick,rebase_linear
+from astra_daemon import AstraDaemon
 
 def _b(s:str)->bytes: return os.fsencode(s)
 def main(argv=None)->int:
@@ -22,7 +23,7 @@ def main(argv=None)->int:
     x=sub.add_parser('switch'); x.add_argument('name'); x.add_argument('--force',action='store_true')
     x=sub.add_parser('cherry-pick'); x.add_argument('revision')
     x=sub.add_parser('rebase'); x.add_argument('onto')
-    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('reconcile-head'); x=sub.add_parser('resolve-head'); x.add_argument('--ref',action='append',default=[]); x.add_argument('--workspace',action='append',default=[]); sub.add_parser('head')
+    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('reconcile-head'); sub.add_parser('daemon'); x=sub.add_parser('resolve-head'); x.add_argument('--ref',action='append',default=[]); x.add_argument('--workspace',action='append',default=[]); sub.add_parser('head')
     a=p.parse_args(argv)
     try:
         if a.cmd=='init': AstraRepository.init(a.path); print(f'initialized AstraVCS repository in {Path(a.path).resolve()}'); return 0
@@ -69,6 +70,11 @@ def main(argv=None)->int:
                 for item in items:
                     name,value=item.split('=',1); resolutions[(kind,_b(name))]=None if value=='-' else value
             print(repo.resolve_operation_reconcile(resolutions).operation_id or '')
+        elif a.cmd=='daemon':
+            daemon=AstraDaemon(repo);addr=daemon.serve();print(daemon.session_path,flush=True)
+            try: daemon.thread.join()
+            except KeyboardInterrupt: pass
+            finally: daemon.close()
         elif a.cmd=='head': print(ws.head() or '')
         return 0
     except Exception as exc:
