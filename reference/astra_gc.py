@@ -50,6 +50,17 @@ class GarbageCollector:
   # retained until an explicit retention policy exists.
   for typ,oid,_ in self.repo.iter_mappings():
    if typ in (ObjectType.OPERATION,ObjectType.RELEASE_MANIFEST,ObjectType.ATTESTATION):mark(typ,oid)
+  # Explicit legal/mission retention holds are additional roots.
+  try:
+   from astra_retention import RetentionHoldStore
+   holds=RetentionHoldStore(self.repo)
+   try:
+    for typ,oid,_ in holds.all():mark(typ,oid)
+   finally:holds.close()
+  except Exception:
+   # A corrupt retention database must fail closed by preventing pruning; mark()
+   # will surface that through the caller rather than guessing protected state.
+   raise
   # Active merge recovery data protects its canonical objects.
   m=self.repo.meta/'workspaces'/'default'/'merge-state.json'
   if m.exists():

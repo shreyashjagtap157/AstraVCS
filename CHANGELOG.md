@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 - Mission Transport, Retention and Release Engineering
+
+- Added signed store-forward transfer envelopes with destination binding, expiry, integrity and replay/rollback detection for disconnected/high-delay transport adapters.
+- Added durable retention/legal/mission holds and integrated them as conservative GC roots.
+- Added signed multi-platform stable/beta/nightly update-channel manifests with anti-rollback enforcement.
+- Added canonical top-level VERSION metadata plus cross-web/desktop/SDK/Kubernetes version-consistency validation.
+- Added deterministic release-artifact checksum manifest generation.
+- Kept BPv7 compliance explicitly deferred to a standards-grade transport adapter rather than mislabelling the generic store-forward layer.
+
 ## 0.12.0 - Search, Multi-Repo Workspaces, Enterprise Identity and Packages
 
 - Added disposable UTF-8 code/content search and symbol indexes keyed by immutable Revision/Content identities.

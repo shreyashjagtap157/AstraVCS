@@ -79,3 +79,21 @@ class SignedUpdateMetadata:
   try:public.verify(signature,payload);data=json.loads(payload)
   except Exception as exc:raise AssuranceError('invalid update metadata signature or payload') from exc
   rollback.accept(int(data['sequence']));return data
+
+class UpdateChannelManifest:
+ def __init__(self,private):self.private=private
+ def create(self,channel,version,sequence,artifacts,*,minimum_version=None):
+  if channel not in ('stable','beta','nightly'):raise AssuranceError('invalid update channel')
+  rows=[]
+  for platform,digest,url in sorted(artifacts):rows.append({'platform':platform,'sha256':digest,'url':url})
+  payload=canonical_json({'schema':1,'channel':channel,'version':version,'sequence':sequence,'minimum_version':minimum_version,'artifacts':rows});return payload,self.private.sign(payload),key_id(self.private.public_key())
+ @staticmethod
+ def verify(payload,signature,public,rollback:AntiRollbackStore,*,channel):
+  try:public.verify(signature,payload);data=json.loads(payload)
+  except Exception as exc:raise AssuranceError('invalid update channel signature/payload') from exc
+  if data.get('schema')!=1 or data.get('channel')!=channel:raise AssuranceError('update channel mismatch')
+  seen=set()
+  for a in data.get('artifacts',[]):
+   if a.get('platform') in seen or len(a.get('sha256',''))!=64:raise AssuranceError('invalid/duplicate update artifact')
+   seen.add(a['platform'])
+  rollback.accept(int(data['sequence']));return data

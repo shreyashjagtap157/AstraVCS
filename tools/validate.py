@@ -8,6 +8,7 @@ def main():
  run([sys.executable,'-W','error::ResourceWarning','-m','unittest','discover','-s','tests/reference','-q'])
  run([sys.executable,'-m','compileall','-q','reference','tests/reference'])
  run(['git','diff','--check'])
+ run([sys.executable,'tools/check_versions.py'])
  for d in ['apps/web','apps/desktop','sdk/typescript']:run(['npx','--yes','tsc','--noEmit'],ROOT/d)
  if shutil.which('go'):run(['go','test','./...'],ROOT/'sdk/go')
  if shutil.which('javac'):
