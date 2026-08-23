@@ -1,3 +1,10 @@
+## 0.18.0 - Dual-Control Self-Hosting Qualification
+
+- Added `tools/self_host_check.py` to commit the exact Git `HEAD` source archive through AstraVCS and compare all tracked paths, blob bytes, symlinks, and executable modes against Git.
+- Self-host qualification runs repository `fsck`, portable bundle creation, fresh bundle restore, second `fsck`, and published-ref equivalence checks.
+- Added `tools/validate_release.py` as a post-commit release gate combining ordinary qualification with self-hosting.
+- Added self-hosting qualification documentation and retained Git as an independent recovery/control mirror.
+
 ## 0.17.0 - Independent Conformance and State-Model Qualification
 
 - Added a dependency-isolated canonical envelope/semantic verifier that does not import Astra model/codec/repository modules.
