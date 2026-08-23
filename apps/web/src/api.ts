@@ -1,6 +1,7 @@
 export interface RefRecord { refs: [string,string][]; operation_head: string|null }
 export interface RepositoryList { repositories: string[] }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
+export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
   constructor(private readonly base:string, private token:string) {}
   setToken(token:string):void { this.token=token }
@@ -15,4 +16,6 @@ export class AstraApi {
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
+  createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
+  agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
 }

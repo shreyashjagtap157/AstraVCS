@@ -13,3 +13,5 @@ class AstraClient:
  def repositories(self):return self._request('GET','/v1/repos')['repositories']
  def refs(self,repo):return self._request('GET',f'/v1/repos/{repo}/refs')
  def create_repository(self,name):return self._request('POST','/v1/repos',{'name':name})
+ def create_agent_job(self,repo,input_revision,task,capabilities=('changes.create','proposals.create'),network_policy='deny',max_seconds=900):return self._request('POST',f'/v1/repos/{repo}/agents',{'input_revision':input_revision,'task':task,'capabilities':list(capabilities),'network_policy':network_policy,'max_seconds':max_seconds})
+ def agent_job(self,job_id):return self._request('GET',f'/v1/agents/{job_id}')['job']

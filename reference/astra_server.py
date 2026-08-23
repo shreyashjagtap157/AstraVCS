@@ -16,6 +16,8 @@ from astra_semantic_codec import encode_semantic
 from astra_search import SearchIndex
 from astra_workspace_manifest import WorkspaceEntry,WorkspaceManifest,WorkspaceManifestStore
 from astra_packages import PackageRegistry
+from astra_agents import AgentJobStore,AgentSpec,AgentCoordinator
+from astra_version import product_version
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -29,11 +31,13 @@ class RepositoryRegistry:
 
 class AstraServer:
  def __init__(self,root,policies=None,registry=None,tokens=None,platform=None):
-  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=WorkspaceManifestStore(self.root/'workspaces');self.packages=PackageRegistry(self.root/'packages');self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=WorkspaceManifestStore(self.root/'workspaces');self.packages=PackageRegistry(self.root/'packages');self.agent_jobs=AgentJobStore(self.root/'agents.sqlite');self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+ def run_agent_job(self,jid,runtime,*,target_ref='refs/heads/main',production=True):
+  return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production)
  def serve(self,host='127.0.0.1',port=0):
   outer=self
   class Handler(BaseHTTPRequestHandler):
-   server_version='AstraVCS/0.3'
+   server_version='AstraVCS/'+product_version()
    def log_message(self,*a):pass
    def _json(self,status,data):
     raw=json.dumps(data,sort_keys=True,separators=(',',':')).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
@@ -53,6 +57,10 @@ class AstraServer:
      if p==['v1','health']:return self._json(200,{'status':'ok','api':'v1'})
      if p==['v1','repos']:
       self._require('repos.list');return self._json(200,{'repositories':outer.registry.list()})
+     if len(p)==3 and p[:2]==['v1','agents']:
+      row=outer.agent_jobs.get(p[2])
+      if not row:return self._json(404,{'error':'agent_job_not_found'})
+      self._require('agents.read',row['repo']);return self._json(200,{'job':row})
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2];self._require('repo.read',name);repo=outer.registry.open(name)
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
@@ -105,6 +113,10 @@ class AstraServer:
       self._require('workspaces.write');entries=tuple(WorkspaceEntry(x['name'],x['repository'],x['revision'],x['mount']) for x in body['entries']);m=WorkspaceManifest(body['name'],entries);outer.workspaces.verify(m,outer.registry);oid=outer.workspaces.put(m);return self._json(201,{'id':oid})
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2];repo=outer.registry.open(name)
+      if p[3:]==['agents']:
+       principal=self._require('agents.start',name);input_revision=body['input_revision'];repo.get(ObjectType.REVISION,input_revision);caps=tuple(body.get('capabilities',('changes.create','proposals.create')))
+       for cap in caps:self._require(cap,name)
+       spec=AgentSpec(name,input_revision,body['task'],caps,body.get('network_policy','deny'),int(body.get('max_seconds',900)));jid=outer.agent_jobs.create(spec);outer.platform.emit('agent.queued',name,principal.principal_id,{'job_id':jid,'input_revision':input_revision});return self._json(201,{'id':jid})
       if p[3:]==['bundle']:
        principal=self._require('repo.write',name);n=int(self.headers.get('Content-Length','0'))
        if n>512*1024*1024:raise ValueError('bundle too large')
@@ -143,4 +155,4 @@ class AstraServer:
   if self.http:self.http.shutdown();self.http.server_close();self.thread.join(timeout=5)
   if self._owns_tokens:self.tokens.close()
   if self._owns_platform:self.platform.close()
-  self.packages.close()
+  self.packages.close();self.agent_jobs.close()

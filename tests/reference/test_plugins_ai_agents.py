@@ -1,4 +1,4 @@
-import sys,tempfile,unittest
+import json,sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'reference'))
 from astra_plugins import PluginRegistry,PluginManifest,PluginError
@@ -22,6 +22,16 @@ class ExtTests(unittest.TestCase):
    s=AgentJobStore(Path(td)/'j.db');spec=AgentSpec('r','11'*32,'task',('repo.read',));jid=s.create(spec);rt=CallbackAgentRuntime(lambda spec,ws:{'ok':True})
    with self.assertRaisesRegex(AgentError,'production isolation'):s.run(jid,rt,Path(td),production=True)
    result=s.run(jid,rt,Path(td));self.assertEqual(result['status'],'completed');s.close()
+class AgentClaimTests(unittest.TestCase):
+ def test_only_one_store_instance_can_claim_job(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   path=Path(td)/'j.db';a=AgentJobStore(path);jid=a.create(AgentSpec('r','11'*32,'t',('repo.read',)));b=AgentJobStore(path)
+   try:
+    self.assertEqual(a.claim(jid)['status'],'running')
+    with self.assertRaisesRegex(AgentError,'not queued'):b.claim(jid)
+   finally:a.close();b.close()
+
 if __name__=='__main__':unittest.main()
 
 class DaemonMCPTests(unittest.TestCase):
@@ -43,3 +53,48 @@ class DaemonMCPTests(unittest.TestCase):
   from astra_local import LocalWorkspace
   with tempfile.TemporaryDirectory() as td:
    repo=AstraRepository.init(td);w=LocalWorkspace(repo);(Path(td)/'x').write_text('x');c=w.commit(b'c');m=AstraMCP(repo);tools=m.handle({'jsonrpc':'2.0','id':1,'method':'tools/list'})['result']['tools'];self.assertTrue(tools);r=m.handle({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'get_revision','arguments':{'revision_id':c.revision_id}}});self.assertEqual(r['result']['revision_id'],c.revision_id)
+
+class AgentCoordinatorTests(unittest.TestCase):
+ def test_agent_work_is_committed_and_proposed_not_pushed_to_main(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime
+  from astra_local import LocalWorkspace
+  from astra_codec import ObjectType
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    spec=AgentSpec('r',base.revision_id,'edit x',('changes.create','proposals.create'))
+    jid=jobs.create(spec)
+    def run(spec,workspace):
+     (workspace/'x').write_text('agent');return {'ok':True}
+    row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(run));payload=json.loads(row['result']);self.assertIn('proposal_id',payload);self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],base.revision_id);repo.get(ObjectType.REVISION,payload['revision']);self.assertEqual(platform.get_proposal(payload['proposal_id'])['source_revision'],payload['revision'])
+   finally:jobs.close();platform.close()
+ def test_agent_no_change_has_explicit_terminal_state(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'noop',('changes.create','proposals.create')))
+    row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(lambda spec,workspace:{'ok':True}))
+    self.assertEqual(row['status'],'no_change');self.assertEqual(json.loads(row['result'])['reason'],'agent completed without producing a repository change');self.assertEqual(platform.list_proposals('r'),[])
+   finally:jobs.close();platform.close()
+ def test_agent_target_advance_requires_rebase_and_does_not_open_proposal(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'edit',('changes.create','proposals.create')))
+    def run(spec,workspace):
+     (workspace/'x').write_text('agent')
+     (repo.worktree/'y').write_text('advance');w.commit(b'advance')
+     return {'ok':True}
+    row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(run));payload=json.loads(row['result'])
+    self.assertEqual(row['status'],'needs_rebase');self.assertIn('revision',payload);self.assertEqual(platform.list_proposals('r'),[])
+   finally:jobs.close();platform.close()

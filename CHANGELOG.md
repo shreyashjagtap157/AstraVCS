@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.0 - Agent-Native Collaboration and Client Bridge
+
+- Added `AgentCoordinator` to execute agent tasks from immutable input revisions in ephemeral Astra workspaces, import resulting canonical objects without publishing refs, and open proposals rather than writing protected branches.
+- Added explicit `no_change` and `needs_rebase` terminal states so completed runtimes do not misrepresent failed VCS handoff.
+- Added atomic queued-to-running job claiming so concurrent workers cannot execute one agent job twice.
+- Added capability-gated hosted agent-job create/read APIs while keeping actual runtime execution operator-injected and outside the HTTP request surface.
+- Added Python, TypeScript, Go, Java, and .NET client support for the agent/job API surface plus a web-console agent queue workflow.
+- Added a typed desktop local-daemon bridge for status, history, and commit operations so native shells consume the shared daemon/core rather than reimplementing VCS semantics.
+- Replaced the stale hard-coded HTTP server banner with the canonical product `VERSION`.
+- Added regression coverage for no-op agents, stale target refs, duplicate-worker claims, ungranted capabilities, and protected-ref non-mutation.
+
 ## 0.13.0 - Mission Transport, Retention and Release Engineering
 
 - Added signed store-forward transfer envelopes with destination binding, expiry, integrity and replay/rollback detection for disconnected/high-delay transport adapters.
