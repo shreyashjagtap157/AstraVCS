@@ -9,7 +9,7 @@ import secrets
 from typing import Iterator
 
 from astra_codec import ObjectType
-from astra_model import validate_object_id
+from astra_model import validate_name, validate_object_id
 from astra_semantic_codec import decode_semantic, encode_semantic, semantic_id
 from astra_store import (
     CorruptObjectError,
@@ -656,3 +656,59 @@ def reconcile_operation_heads(self: AstraRepository) -> OperationReconcileResult
         return OperationReconcileResult(op.operation_id, True)
 
 AstraRepository.reconcile_operation_heads = reconcile_operation_heads
+
+def resolve_operation_reconcile(self: AstraRepository, resolutions: dict[tuple[str, bytes], str | None]) -> OperationReconcileResult:
+    """Resolve a persisted two-tip operation reconciliation conflict explicitly.
+
+    `resolutions` maps ("ref"|"workspace", raw_name) to an ObjectID or None
+    (delete). Every persisted conflict must be resolved; stale heads fail closed.
+    """
+    _ensure_state(self)
+    state, head_path, lock_path = _state_paths(self)
+    conflict_file = state / "operation-reconcile-conflict.json"
+    with _exclusive_file_lock(lock_path):
+        if not conflict_file.exists():
+            raise StateCorruptionError("no operation reconciliation conflict is pending")
+        try:
+            doc = json.loads(conflict_file.read_text(encoding="utf-8"))
+            left = doc["left"]; right = doc["right"]; base_id = doc.get("base"); conflict_rows = doc["conflicts"]
+            validate_object_id(left, "left operation"); validate_object_id(right, "right operation")
+            if base_id is not None: validate_object_id(base_id, "base operation")
+        except Exception as exc:
+            raise StateCorruptionError("malformed operation reconciliation conflict record") from exc
+        current = operation_head(self)
+        if current not in (left, right):
+            raise StaleOperationHeadError(f"operation head moved since reconciliation conflict: {current!r}")
+        operations, _tips = _operation_graph(self)
+        if left not in operations or right not in operations:
+            raise StateCorruptionError("reconciliation parent operation is missing")
+        base_view = RepositoryView.create() if base_id is None else self.get(ObjectType.VIEW, operations[base_id].view_id)
+        left_view = self.get(ObjectType.VIEW, operations[left].view_id)
+        right_view = self.get(ObjectType.VIEW, operations[right].view_id)
+        refs, _ = _merge_view_map(base_view.refs, left_view.refs, right_view.refs, "ref")
+        workspaces, _ = _merge_view_map(base_view.workspace_heads, left_view.workspace_heads, right_view.workspace_heads, "workspace")
+        expected = set()
+        for row in conflict_rows:
+            kind = row.get("kind")
+            if kind not in ("ref", "workspace"):
+                raise StateCorruptionError("unknown reconciliation conflict kind")
+            try: name = bytes.fromhex(row["name_hex"])
+            except Exception as exc: raise StateCorruptionError("malformed reconciliation conflict name") from exc
+            expected.add((kind, name))
+        if set(resolutions) != expected:
+            missing = expected - set(resolutions); extra = set(resolutions) - expected
+            raise StateCorruptionError(f"reconciliation resolutions must exactly cover conflicts; missing={len(missing)} extra={len(extra)}")
+        for (kind, name), oid in resolutions.items():
+            validate_name(name, f"{kind} name")
+            if oid is not None: validate_object_id(oid, f"{kind} resolution")
+            target = refs if kind == "ref" else workspaces
+            if oid is None: target.pop(name, None)
+            else: target[name] = oid
+        merged_view = RepositoryView.create(refs, workspaces); self.put(merged_view)
+        op = Operation(tuple(sorted((left, right))), merged_view.view_id, b"resolve-operation-reconcile")
+        self.put(op)
+        _atomic_replace(self, head_path, (op.operation_id + "\n").encode("ascii"))
+        conflict_file.unlink(); self._fsync_dir(conflict_file.parent)
+        return OperationReconcileResult(op.operation_id, True)
+
+AstraRepository.resolve_operation_reconcile = resolve_operation_reconcile

@@ -22,7 +22,7 @@ def main(argv=None)->int:
     x=sub.add_parser('switch'); x.add_argument('name'); x.add_argument('--force',action='store_true')
     x=sub.add_parser('cherry-pick'); x.add_argument('revision')
     x=sub.add_parser('rebase'); x.add_argument('onto')
-    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('reconcile-head'); sub.add_parser('head')
+    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('reconcile-head'); x=sub.add_parser('resolve-head'); x.add_argument('--ref',action='append',default=[]); x.add_argument('--workspace',action='append',default=[]); sub.add_parser('head')
     a=p.parse_args(argv)
     try:
         if a.cmd=='init': AstraRepository.init(a.path); print(f'initialized AstraVCS repository in {Path(a.path).resolve()}'); return 0
@@ -63,6 +63,12 @@ def main(argv=None)->int:
         elif a.cmd=='recover-head': print(repo.recover_operation_head() or '')
         elif a.cmd=='reconcile-head':
             result=repo.reconcile_operation_heads(); print(result.operation_id or result.conflict_path or '')
+        elif a.cmd=='resolve-head':
+            resolutions={}
+            for kind,items in (('ref',a.ref),('workspace',a.workspace)):
+                for item in items:
+                    name,value=item.split('=',1); resolutions[(kind,_b(name))]=None if value=='-' else value
+            print(repo.resolve_operation_reconcile(resolutions).operation_id or '')
         elif a.cmd=='head': print(ws.head() or '')
         return 0
     except Exception as exc:

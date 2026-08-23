@@ -38,3 +38,29 @@ class OperationReconcileTests(unittest.TestCase):
                 v=RepositoryView.create({b'main':oid,b'x'+bytes([48+i]):oid}); r.put(v); r.put(Operation((b.operation_id,),v.view_id,b'x'+bytes([48+i])))
             with self.assertRaises(StateCorruptionError): r.reconcile_operation_heads()
 if __name__=='__main__': unittest.main()
+
+class OperationReconcileResolutionTests(OperationReconcileTests):
+    def test_manual_resolution_publishes_two_parent_operation(self):
+        with tempfile.TemporaryDirectory() as td:
+            r=AstraRepository.init(td)
+            _,l,o=self._diverge(r, RepositoryView.create({b'main':OID_B},{b'default':OID_A}), RepositoryView.create({b'main':OID_C},{b'default':OID_A}))
+            pending=r.reconcile_operation_heads(); self.assertIsNotNone(pending.conflict_path)
+            result=r.resolve_operation_reconcile({('ref',b'main'):OID_C}); self.assertTrue(result.merged)
+            self.assertEqual(dict(r.current_view().refs)[b'main'],OID_C)
+            op=r.get(__import__('astra_codec').ObjectType.OPERATION,result.operation_id)
+            self.assertEqual(set(op.parents),{l.operation_id,o.operation_id})
+            self.assertFalse(Path(pending.conflict_path).exists())
+    def test_resolution_requires_exact_coverage(self):
+        with tempfile.TemporaryDirectory() as td:
+            r=AstraRepository.init(td)
+            self._diverge(r, RepositoryView.create({b'main':OID_B},{b'default':OID_A}), RepositoryView.create({b'main':OID_C},{b'default':OID_A}))
+            r.reconcile_operation_heads()
+            with self.assertRaises(StateCorruptionError): r.resolve_operation_reconcile({})
+    def test_resolution_rejects_stale_head(self):
+        with tempfile.TemporaryDirectory() as td:
+            r=AstraRepository.init(td)
+            self._diverge(r, RepositoryView.create({b'main':OID_B},{b'default':OID_A}), RepositoryView.create({b'main':OID_C},{b'default':OID_A}))
+            r.reconcile_operation_heads()
+            # Publish unrelated state to move the head away from both recorded tips.
+            current=r.operation_head(); view=r.current_view(); r.publish_view(view,b'unrelated',expected_head=current)
+            with self.assertRaises(Exception): r.resolve_operation_reconcile({('ref',b'main'):OID_B})

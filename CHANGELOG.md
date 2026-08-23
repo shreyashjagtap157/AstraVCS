@@ -1,3 +1,12 @@
+## 0.22.0 - Operation Reconciliation Resolution
+
+- Added explicit resolution of persisted two-tip operation reconciliation conflicts.
+- Every conflicting ref/workspace name must be resolved explicitly to an ObjectID or deletion before publication.
+- Resolution validates that the operation head has not moved, reconstructs all non-conflicting three-way edits, and publishes a two-parent reconciliation Operation.
+- Added `astra resolve-head --ref name=<oid|-> --workspace name=<oid|->` porcelain.
+- Added regression coverage for successful resolution, exact conflict coverage, and stale-head rejection.
+- Full executable regression passes at 174 Python tests before release qualification.
+
 ## 0.21.0 - Divergent Operation Reconciliation
 
 - Added deterministic three-way reconciliation for exactly two divergent repository Operation tips.
