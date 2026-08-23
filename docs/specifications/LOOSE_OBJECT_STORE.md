@@ -19,7 +19,7 @@ StoreKey = digest(
 
 The digest function is the same length-prefixed SHA-256 construction used by the bootstrap semantic model. StoreKey is 32 bytes and rendered as 64 lowercase hexadecimal characters.
 
-This separation is mandatory because the bootstrap `ObjectEnvelope.payload` is not yet the final canonical serialization of every semantic object. Repository meaning must not become coupled to this temporary physical representation.
+This separation is mandatory because the bootstrap `ObjectEnvelope.payload` is a replaceable physical serialization rather than semantic repository identity. Repository meaning must not become coupled to this temporary physical representation.
 
 ## Layout
 

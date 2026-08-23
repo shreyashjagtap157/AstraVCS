@@ -18,7 +18,9 @@ from astra_store import (
     validate_store_key,
 )
 
-REPOSITORY_FORMAT = b"ASTRA-BOOTSTRAP-REPOSITORY\nversion=0\n"
+BOOTSTRAP_REPOSITORY_FORMAT = b"ASTRA-BOOTSTRAP-REPOSITORY\nversion=0\n"
+REPOSITORY_FORMAT_1 = b'{"format":1,"operation_state":1,"semantic_map":1,"storage":"loose-v1"}\n'
+REPOSITORY_FORMAT = REPOSITORY_FORMAT_1
 _OBJECT_DIRS = {
     ObjectType.CONTENT: "content",
     ObjectType.TREE: "tree",
@@ -96,7 +98,7 @@ class AstraRepository:
         self.format_path = self.meta / "format"
         self.mapping_root = self.meta / "semantic-map"
         self.store_root = self.meta / "store"
-        self._validate_open()
+        self.format_version = self._validate_open()
         self.store = LooseObjectStore(self.store_root)
 
     @classmethod
@@ -124,17 +126,47 @@ class AstraRepository:
             raise
         return cls(root)
 
-    def _validate_open(self) -> None:
+    def _validate_open(self) -> int:
         if not self.meta.is_dir():
             raise RepositoryFormatError(".astra repository metadata is missing")
         try:
             data = self.format_path.read_bytes()
         except FileNotFoundError as exc:
             raise RepositoryFormatError("repository format marker is missing") from exc
-        if data != REPOSITORY_FORMAT:
+        if data == BOOTSTRAP_REPOSITORY_FORMAT:
+            version = 0
+        elif data == REPOSITORY_FORMAT_1:
+            version = 1
+        else:
             raise RepositoryFormatError("unsupported or corrupt repository format marker")
         if not self.mapping_root.is_dir():
             raise RepositoryFormatError("semantic-map directory is missing")
+        return version
+
+    def migrate_to_format1(self) -> bool:
+        """Verify and atomically migrate a bootstrap-format repository to Format 1.
+
+        No semantic object is rewritten: semantic IDs, StoreKeys, mappings, Views,
+        Operations, refs and workspaces remain byte-for-byte unchanged.
+        """
+        if self.format_version == 1:
+            return False
+        if self.format_version != 0:
+            raise RepositoryFormatError("repository format cannot be migrated")
+        result = self.fsck()
+        if not result.ok:
+            raise RepositoryFormatError("repository fsck failed; refusing format migration")
+        # Validate mutable published state and every reachable revision root.
+        try:
+            view = self.current_view()
+            from astra_local import verify_revision_links
+            for oid in sorted(set(dict(view.refs).values()) | set(dict(view.workspace_heads).values())):
+                verify_revision_links(self, oid)
+        except Exception as exc:
+            raise RepositoryFormatError("published repository state failed validation; refusing format migration") from exc
+        _atomic_replace(self, self.format_path, REPOSITORY_FORMAT_1)
+        self.format_version = 1
+        return True
 
     @staticmethod
     def _fsync_dir(path: Path) -> None:

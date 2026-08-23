@@ -1,6 +1,6 @@
 # AstraVCS Bootstrap Canonical Identity Encoding — v0
 
-This document specifies the bootstrap identity encoding used by `astra-model` and the Python executable reference model. It is intentionally narrow. It is not yet Repository Format 1.
+This document specifies the bootstrap identity encoding used by `astra-model` and the Python executable reference model. It is intentionally narrow. Repository Format 1 now preserves these semantic identities while keeping physical encoding replaceable.
 
 ## Digest framing
 

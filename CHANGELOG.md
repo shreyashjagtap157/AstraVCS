@@ -1,3 +1,13 @@
+## 0.28.0 - Repository Format 1
+
+- Introduced Repository Format 1 as the first stable repository-layout/state contract while preserving replaceable physical storage/index/transport implementations.
+- New repositories initialize directly with the Format 1 descriptor; bootstrap format 0 repositories remain readable.
+- Added verified `migrate_to_format1()` / `astra migrate-format` migration with object `fsck`, published View validation, recursive Revision-link verification, atomic descriptor replacement, and idempotency.
+- Migration preserves all semantic IDs, current StoreKeys, mappings, refs, workspaces, Views, and Operations.
+- Added normative `REPOSITORY_FORMAT_1.md` and corrected stale bootstrap documentation to distinguish stable semantic identity from replaceable physical encoding.
+- Added migration/corruption/idempotency regression coverage.
+- Full executable regression passes at 188 Python tests before release/self-host qualification.
+
 ## 0.27.0 - Durable Protected-Ref Policy Control Plane
 
 - Added transactional SQL protected-ref policy storage with deterministic priority/pattern matching and restart persistence.

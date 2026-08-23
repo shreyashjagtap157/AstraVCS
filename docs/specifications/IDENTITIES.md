@@ -10,7 +10,7 @@ Bootstrap generation uses cryptographically strong random 128-bit values represe
 
 `ContentID`, `TreeID`, `ChangeVersionID`, `RevisionID`, `ConflictID`, `ViewID`, and `OperationID` are content-derived identifiers.
 
-The bootstrap reference model uses SHA-256 over a domain separator followed by a length-delimited deterministic representation. Production canonical encoding remains to be frozen during the specification phase.
+The bootstrap reference model uses SHA-256 over a domain separator followed by a length-delimited deterministic representation. Repository Format 1 preserves these semantic identities; physical envelope/storage encodings remain independently versioned and replaceable.
 
 ## Domain separation
 

@@ -6,7 +6,7 @@ Accepted for `v0.0.5`.
 
 ## Context
 
-AstraVCS requires durable object persistence before a usable repository can be built, but its final canonical semantic object encoding and optimized storage layout are not yet frozen. Introducing packfiles, segment compaction, mmap indexes, or other high-performance structures now would combine storage-format risk with unresolved semantic-format work.
+AstraVCS requires durable object persistence before a usable repository can be built, but semantic identity is now stable under Repository Format 1 while optimized physical storage remains intentionally replaceable. Introducing packfiles, segment compaction, mmap indexes, or other high-performance structures now would combine storage-format risk with unresolved semantic-format work.
 
 ## Decision
 

@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.27.0`
+`v0.28.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.27.0` closes the common two-tip repository Operation divergence gap. Compatible ref/workspace edits reconcile deterministically into a two-parent Operation; incompatible edits persist a local reconciliation-conflict record and leave the current head unchanged. Three-or-more tips remain fail-closed until a generalized operation-merge design is qualified.
+`v0.28.0` introduces Repository Format 1. New repositories use the stable Format 1 layout/state descriptor; legacy bootstrap repositories remain readable and migrate only after full object and published-history validation. Semantic IDs and existing repository history are preserved byte-for-byte. Generalized N-tip operation reconciliation, durable policies/plugins, and the prior hosted/client/assurance capabilities remain integrated.
 
 ## Validation available in this environment
 
@@ -27,5 +27,5 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 - Rust toolchain execution remains unavailable in this runtime, so Rust compilation, rustfmt, Clippy, Rust fuzzing, and Rust unit tests are not claimed.
 - Live PostgreSQL/S3 production-service qualification is separate from the executable SQLite/dialect-neutral conformance backends.
 - Windows-specific directory fsync/durability semantics remain unclaimed in the Rust loose-store mirror.
-- Generalized reconciliation of three-or-more divergent Operation tips remains fail-closed.
+- Disconnected or ambiguous multi-tip Operation histories remain fail-closed; common-base N-tip reconciliation is supported.
 - External mission/agency certification cannot be self-declared by the implementation.
