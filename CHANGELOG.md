@@ -1,3 +1,12 @@
+## 0.20.0 - Native Issues and Comments
+
+- Added durable issue/comment lifecycle to SQLite and dialect-neutral shared collaboration stores.
+- Added issue opened/comment/closed typed events while keeping issue state outside canonical VCS objects.
+- Added least-privilege `issues.read` / `issues.write` HTTP routes without implicitly granting source-code `repo.read`.
+- Added Python, TypeScript, and Go SDK issue APIs.
+- Added single-node and shared-control/cross-node issue qualification tests.
+- Full executable regression passes at 165 Python tests plus TypeScript, Go, and Java client gates.
+
 ## 0.19.0 - Repository Soak and Durability Qualification
 
 - Added deterministic long-running repository soak tooling with configurable seeds/step counts.

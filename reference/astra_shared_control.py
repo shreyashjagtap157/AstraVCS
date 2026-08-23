@@ -29,6 +29,8 @@ class SharedControlPlane:
   self.reviews=Table('cp_reviews',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('reviewer',String(256)),Column('state',String(32)),Column('body',Text),Column('created_at',Integer))
   self.checks=Table('cp_checks',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('name',String(256)),Column('status',String(32)),Column('conclusion',String(32)),Column('details',Text),Column('updated_at',Integer),UniqueConstraint('proposal_id','name',name='uq_cp_check'))
   self.events_t=Table('cp_events',self.meta,Column('seq',Integer,primary_key=True,autoincrement=True),Column('type',String(128)),Column('repo',String(256)),Column('actor',String(256)),Column('payload',Text),Column('created_at',Integer))
+  self.issues=Table('cp_issues',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256)),Column('title',Text),Column('body',Text),Column('state',String(32)),Column('created_by',String(256)),Column('created_at',Integer),Column('updated_at',Integer))
+  self.issue_comments_t=Table('cp_issue_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('issue_id',Integer),Column('author',String(256)),Column('body',Text),Column('created_at',Integer))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
@@ -104,6 +106,32 @@ class SQLCollaborationStore:
   if not p:raise PlatformError('proposal not found')
   with self.cp.engine.begin() as c:c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(status=state))
   self.emit('proposal.'+state,p['repo'],actor,{'proposal_id':pid})
+
+ def create_issue(self,repo,title,body,actor):
+  if not title or len(title)>4096:raise PlatformError('invalid issue title')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:r=c.execute(insert(self.cp.issues).values(repo=repo,title=title,body=body,state='open',created_by=actor,created_at=now,updated_at=now));iid=r.inserted_primary_key[0]
+  self.emit('issue.opened',repo,actor,{'issue_id':iid,'title':title});return iid
+ def get_issue(self,iid):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.issues).where(self.cp.issues.c.id==iid)).mappings().first();return None if r is None else dict(r)
+ def list_issues(self,repo,state='open'):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.issues).where(and_(self.cp.issues.c.repo==repo,self.cp.issues.c.state==state)).order_by(self.cp.issues.c.created_at,self.cp.issues.c.id)).mappings()]
+ def add_issue_comment(self,iid,author,body):
+  if not body:raise PlatformError('issue comment must not be empty')
+  issue=self.get_issue(iid)
+  if not issue:raise PlatformError('issue not found')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:r=c.execute(insert(self.cp.issue_comments_t).values(issue_id=iid,author=author,body=body,created_at=now));cid=r.inserted_primary_key[0];c.execute(update(self.cp.issues).where(self.cp.issues.c.id==iid).values(updated_at=now))
+  self.emit('issue.comment',issue['repo'],author,{'issue_id':iid,'comment_id':cid});return cid
+ def issue_comments(self,iid):
+  if not self.get_issue(iid):raise PlatformError('issue not found')
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.issue_comments_t).where(self.cp.issue_comments_t.c.issue_id==iid).order_by(self.cp.issue_comments_t.c.created_at,self.cp.issue_comments_t.c.id)).mappings()]
+ def close_issue(self,iid,actor):
+  issue=self.get_issue(iid)
+  if not issue:raise PlatformError('issue not found')
+  if issue['state']=='closed':return
+  with self.cp.engine.begin() as c:c.execute(update(self.cp.issues).where(self.cp.issues.c.id==iid).values(state='closed',updated_at=int(time.time())))
+  self.emit('issue.closed',issue['repo'],actor,{'issue_id':iid})
  def events(self,after=0,limit=100):
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.events_t).where(self.cp.events_t.c.seq>after).order_by(self.cp.events_t.c.seq).limit(limit)).mappings()]
 

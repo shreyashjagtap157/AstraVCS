@@ -13,6 +13,8 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS reviews(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,reviewer TEXT,state TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS checks(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,name TEXT,status TEXT,conclusion TEXT,details TEXT,updated_at INTEGER,UNIQUE(proposal_id,name));
   CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT,repo TEXT,actor TEXT,payload TEXT,created_at INTEGER);
+  CREATE TABLE IF NOT EXISTS issues(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT,title TEXT,body TEXT,state TEXT,created_by TEXT,created_at INTEGER,updated_at INTEGER);
+  CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
   ''');self.db.commit()
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
@@ -49,5 +51,26 @@ class CollaborationStore:
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
   self.db.execute('UPDATE proposals SET status=? WHERE id=?',(state,pid));self.db.commit();self.emit('proposal.'+state,p['repo'],actor,{'proposal_id':pid})
+
+ def create_issue(self,repo,title,body,actor):
+  if not title or len(title)>4096:raise PlatformError('invalid issue title')
+  now=int(time.time());cur=self.db.execute('INSERT INTO issues(repo,title,body,state,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',(repo,title,body,'open',actor,now,now));self.db.commit();iid=cur.lastrowid;self.emit('issue.opened',repo,actor,{'issue_id':iid,'title':title});return iid
+ def get_issue(self,iid):
+  r=self.db.execute('SELECT * FROM issues WHERE id=?',(iid,)).fetchone();return None if r is None else dict(r)
+ def list_issues(self,repo,state='open'):
+  return [dict(x) for x in self.db.execute('SELECT * FROM issues WHERE repo=? AND state=? ORDER BY created_at,id',(repo,state))]
+ def add_issue_comment(self,iid,author,body):
+  if not body:raise PlatformError('issue comment must not be empty')
+  issue=self.get_issue(iid)
+  if not issue:raise PlatformError('issue not found')
+  now=int(time.time());cur=self.db.execute('INSERT INTO issue_comments(issue_id,author,body,created_at) VALUES(?,?,?,?)',(iid,author,body,now));self.db.execute('UPDATE issues SET updated_at=? WHERE id=?',(now,iid));self.db.commit();cid=cur.lastrowid;self.emit('issue.comment',issue['repo'],author,{'issue_id':iid,'comment_id':cid});return cid
+ def issue_comments(self,iid):
+  if not self.get_issue(iid):raise PlatformError('issue not found')
+  return [dict(x) for x in self.db.execute('SELECT * FROM issue_comments WHERE issue_id=? ORDER BY created_at,id',(iid,))]
+ def close_issue(self,iid,actor):
+  issue=self.get_issue(iid)
+  if not issue:raise PlatformError('issue not found')
+  if issue['state']=='closed':return
+  now=int(time.time());self.db.execute('UPDATE issues SET state=?,updated_at=? WHERE id=?',('closed',now,iid));self.db.commit();self.emit('issue.closed',issue['repo'],actor,{'issue_id':iid})
  def events(self,after=0,limit=100):
   return [dict(x) for x in self.db.execute('SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT ?',(after,limit))]

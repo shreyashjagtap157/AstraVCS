@@ -65,6 +65,7 @@ class SQLAlchemyHostedRuntimeTests(unittest.TestCase):
     with tempfile.TemporaryDirectory() as local_td,tempfile.NamedTemporaryFile(suffix='.astra') as f:
      local=AstraRepository.init(local_td);w=LocalWorkspace(local);(Path(local_td)/'x').write_text('x');rev=w.commit(b'base');lrev=local.get(__import__('astra_codec').ObjectType.REVISION,rev.revision_id);ltree=local.get(__import__('astra_codec').ObjectType.TREE,lrev.tree_id);cid=next(iter(ltree.entries))[1].content_id;create_portable_bundle(local,f.name);apply_portable_bundle(repo,f.name,publish_refs=True)
     token=ra.control.token_store.issue(Principal('u','human'),[Grant('*','*')],None);self.assertEqual(rb.control.token_store.require(token,'repo.read','r').principal_id,'u');self.assertEqual(rb.registry.open('r').get_content(cid),b'x')
+    iid=ra.control.platform_store.create_issue('r','shared issue','body','u');self.assertEqual(rb.control.platform_store.get_issue(iid)['title'],'shared issue')
    finally:ra.close();rb.close()
 
 class SharedHostingConfigTests(unittest.TestCase):

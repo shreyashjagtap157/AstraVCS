@@ -65,7 +65,14 @@ class AstraServer:
       if not row:return self._json(404,{'error':'agent_job_not_found'})
       self._require('agents.read',row['repo']);return self._json(200,{'job':row})
      if len(p)>=3 and p[:2]==['v1','repos']:
-      name=p[2];self._require('repo.read',name);repo=outer.registry.open(name)
+      name=p[2]
+      if p[3:]==['issues']:
+       self._require('issues.read',name);state=parse_qs(urlparse(self.path).query).get('state',['open'])[0];return self._json(200,{'issues':outer.platform.list_issues(name,state)})
+      if len(p)==5 and p[3]=='issues':
+       self._require('issues.read',name);issue=outer.platform.get_issue(int(p[4]))
+       if not issue or issue['repo']!=name:return self._json(404,{'error':'issue_not_found'})
+       return self._json(200,{'issue':issue,'comments':outer.platform.issue_comments(int(p[4]))})
+      self._require('repo.read',name);repo=outer.registry.open(name)
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
        oid=p[4];rev=repo.get(ObjectType.REVISION,oid);return self._json(200,{'revision':oid,'parents':list(rev.parents),'tree':rev.tree_id,'change_version':rev.change_version_id})
@@ -120,6 +127,16 @@ class AstraServer:
        principal=self._require('agents.start',name);input_revision=body['input_revision'];repo.get(ObjectType.REVISION,input_revision);caps=tuple(body.get('capabilities',('changes.create','proposals.create')))
        for cap in caps:self._require(cap,name)
        spec=AgentSpec(name,input_revision,body['task'],caps,body.get('network_policy','deny'),int(body.get('max_seconds',900)));jid=outer.agent_jobs.create(spec);outer.platform.emit('agent.queued',name,principal.principal_id,{'job_id':jid,'input_revision':input_revision});return self._json(201,{'id':jid})
+      if p[3:]==['issues']:
+       principal=self._require('issues.write',name);iid=outer.platform.create_issue(name,body['title'],body.get('body',''),principal.principal_id);return self._json(201,{'id':iid})
+      if len(p)==6 and p[3]=='issues' and p[5]=='comments':
+       principal=self._require('issues.write',name);issue=outer.platform.get_issue(int(p[4]))
+       if not issue or issue['repo']!=name:return self._json(404,{'error':'issue_not_found'})
+       cid=outer.platform.add_issue_comment(int(p[4]),principal.principal_id,body['body']);return self._json(201,{'id':cid})
+      if len(p)==6 and p[3]=='issues' and p[5]=='close':
+       principal=self._require('issues.write',name);issue=outer.platform.get_issue(int(p[4]))
+       if not issue or issue['repo']!=name:return self._json(404,{'error':'issue_not_found'})
+       outer.platform.close_issue(int(p[4]),principal.principal_id);return self._json(200,{'ok':True})
       if p[3:]==['bundle']:
        principal=self._require('repo.write',name);n=int(self.headers.get('Content-Length','0'))
        if n>512*1024*1024:raise ValueError('bundle too large')
