@@ -4,11 +4,11 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.15.0` — multi-node control-plane conformance and leased agent failover milestone.
+`v0.16.0` — dialect-neutral shared hosting and production HA deployment milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-`v0.15.0` retains the v0.14 agent-native workflow and adds crash-safe leased worker claims, heartbeat/reclaim semantics, stale-worker completion rejection, injectable hosted control-plane stores, and two-node conformance using independent store instances/connections over shared backing state. Production HA remains explicitly gated on transactional shared control-plane backends; the checked-in Kubernetes deployment therefore remains single-replica.
+`v0.16.0` builds on leased agent failover with a dialect-neutral SQLAlchemy repository/control-plane backend, shared BlobBackend storage for packages/workspaces, a fail-closed PostgreSQL+S3 production factory, and a real multi-replica Kubernetes profile using shared state only. SQLite remains an executable conformance dialect, while live PostgreSQL/S3 qualification remains an operational release gate.
 
 The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 
@@ -22,4 +22,4 @@ Repository meaning is stable; storage, indexes, transports, UI frameworks, AI mo
 
 ## Current implementation milestone
 
-`v0.15.0` retains semantic IDs as repository authority while keeping storage, indexes, chunking, transports, workspace materialization, and sync-session state replaceable. Sparse/lazy workspaces and resumable synchronization deliberately operate through the same canonical Repository/Content APIs rather than creating alternate history semantics.
+`v0.16.0` retains semantic IDs as repository authority while keeping storage, indexes, chunking, transports, workspace materialization, and sync-session state replaceable. Sparse/lazy workspaces and resumable synchronization deliberately operate through the same canonical Repository/Content APIs rather than creating alternate history semantics.

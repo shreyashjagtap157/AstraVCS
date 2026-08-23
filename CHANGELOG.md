@@ -1,3 +1,15 @@
+## 0.16.0 - Dialect-Neutral Shared Hosting and HA Deployment
+
+- Added SQLAlchemy-based shared repository metadata with atomic conditional operation-head CAS and dialect-neutral schema.
+- Added SQLAlchemy shared control-plane stores for tokens, collaboration/reviews/checks/events, leased agent jobs, package metadata, and workspace manifests.
+- Added shared hosting composition so independent server runtimes can share canonical repository state and the complete control plane.
+- Added separate repository/control BlobBackend namespaces suitable for S3-compatible storage.
+- Added `serve.py --mode shared` and fail-closed production configuration requiring PostgreSQL and S3-compatible storage.
+- Added hosting container dependencies and a three-replica Kubernetes HA deployment profile that uses no local authoritative volume.
+- Release validation now checks both single-node and HA image versions.
+- Added SQLAlchemy CAS-race and two-runtime state-sharing conformance tests plus production-config rejection tests.
+- Full available qualification passes at 158 Python tests plus TypeScript, Go, Java, compile, version, whitespace, and benchmark gates.
+
 ## 0.15.0 - Multi-Node Control Plane and Agent Lease Failover
 
 - Added backward-compatible agent job schema migration with worker identity, lease expiry, heartbeat, attempt counters, and expired-lease reclamation.

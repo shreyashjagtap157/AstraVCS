@@ -1,6 +1,8 @@
 FROM python:3.13-slim
 RUN useradd --system --uid 10001 --create-home astra
 WORKDIR /opt/astravcs
+COPY deployment/docker/requirements-hosting.txt ./requirements-hosting.txt
+RUN pip install --no-cache-dir -r requirements-hosting.txt
 COPY reference ./reference
 COPY tools/serve.py ./serve.py
 RUN mkdir -p /var/lib/astravcs && chown -R astra:astra /var/lib/astravcs /opt/astravcs

@@ -13,8 +13,9 @@ def main():
   if v!=version:fail(f'{f}: {v} != {version}')
  cargo=tomllib.loads((ROOT/'apps/desktop/src-tauri/Cargo.toml').read_text())['package']['version']
  if cargo!=version:ok=fail(f'desktop Cargo version {cargo} != {version}') and ok
- k8s=(ROOT/'deployment/kubernetes/single-node.yaml').read_text();m=re.search(r'image:\s*astravcs/astravcs:([^\s]+)',k8s)
- if not m or m.group(1)!=version:ok=fail(f'kubernetes image version {None if not m else m.group(1)} != {version}') and ok
+ for manifest in ['deployment/kubernetes/single-node.yaml','deployment/kubernetes/ha.yaml']:
+  k8s=(ROOT/manifest).read_text();m=re.search(r'image:\s*astravcs/astravcs:([^\s]+)',k8s)
+  if not m or m.group(1)!=version:ok=fail(f'{manifest} image version {None if not m else m.group(1)} != {version}') and ok
  changelog=(ROOT/'CHANGELOG.md').read_text()
  if f'## {version} ' not in changelog:ok=fail(f'changelog missing {version} release heading') and ok
  return 0 if ok else 1

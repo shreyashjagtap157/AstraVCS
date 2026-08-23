@@ -243,3 +243,72 @@ class HostedRepositoryRegistry:
   if name not in self.metadata.list_repos():raise BackendError('repository does not exist')
   return HostedRepository(name,self.metadata,self.blobs)
  def list(self):return list(self.metadata.list_repos())
+
+class SQLAlchemyMetadataBackend(MetadataBackend):
+ """Dialect-neutral hosted repository metadata using SQLAlchemy Core.
+
+ Repository registration creates an operation-head row up front. Head CAS is a
+ single conditional UPDATE, avoiding backend-specific row-lock/upsert syntax.
+ SQLite is the executable conformance dialect; PostgreSQL uses the same Core
+ expressions when its deployment driver is installed.
+ """
+ def __init__(self,url):
+  from sqlalchemy import create_engine,MetaData,Table,Column,String,Integer
+  self.engine=create_engine(url,future=True,pool_pre_ping=True);self.sa_meta=MetaData()
+  self.mappings=Table('repo_mappings',self.sa_meta,Column('repo',String(256),primary_key=True),Column('type',Integer,primary_key=True),Column('oid',String(64),primary_key=True),Column('key',String(64),nullable=False))
+  self.state=Table('repo_state',self.sa_meta,Column('repo',String(256),primary_key=True),Column('head',String(64)))
+  self.large=Table('repo_large',self.sa_meta,Column('repo',String(256),primary_key=True),Column('content_id',String(64),primary_key=True),Column('manifest_key',String(64),nullable=False))
+  self.repositories=Table('repo_registry',self.sa_meta,Column('name',String(256),primary_key=True));self.sa_meta.create_all(self.engine)
+ def close(self):self.engine.dispose()
+ def register_repo(self,name):
+  from sqlalchemy import insert
+  from sqlalchemy.exc import IntegrityError
+  try:
+   with self.engine.begin() as c:
+    c.execute(insert(self.repositories).values(name=name));c.execute(insert(self.state).values(repo=name,head=None))
+   return True
+  except IntegrityError:return False
+ def list_repos(self):
+  from sqlalchemy import select
+  with self.engine.connect() as c:return tuple(r[0] for r in c.execute(select(self.repositories.c.name).order_by(self.repositories.c.name)))
+ def put_mapping(self,repo,typ,oid,key):
+  from sqlalchemy import insert,select,and_
+  from sqlalchemy.exc import IntegrityError
+  created=True
+  try:
+   with self.engine.begin() as c:c.execute(insert(self.mappings).values(repo=repo,type=typ,oid=oid,key=key))
+  except IntegrityError:created=False
+  with self.engine.connect() as c:r=c.execute(select(self.mappings.c.key).where(and_(self.mappings.c.repo==repo,self.mappings.c.type==typ,self.mappings.c.oid==oid))).first()
+  if not r or r[0]!=key:raise BackendError('semantic mapping collision')
+  return created
+ def get_mapping(self,repo,typ,oid):
+  from sqlalchemy import select,and_
+  with self.engine.connect() as c:r=c.execute(select(self.mappings.c.key).where(and_(self.mappings.c.repo==repo,self.mappings.c.type==typ,self.mappings.c.oid==oid))).first()
+  if not r:raise MappingNotFound(oid)
+  return r[0]
+ def iter_mappings(self,repo):
+  from sqlalchemy import select
+  with self.engine.connect() as c:return tuple(c.execute(select(self.mappings.c.type,self.mappings.c.oid,self.mappings.c.key).where(self.mappings.c.repo==repo).order_by(self.mappings.c.type,self.mappings.c.oid)))
+ def head(self,repo):
+  from sqlalchemy import select
+  with self.engine.connect() as c:r=c.execute(select(self.state.c.head).where(self.state.c.repo==repo)).first();return None if not r else r[0]
+ def compare_and_swap_head(self,repo,expected,new):
+  from sqlalchemy import update,and_
+  condition=self.state.c.head.is_(None) if expected is None else self.state.c.head==expected
+  with self.engine.begin() as c:res=c.execute(update(self.state).where(and_(self.state.c.repo==repo,condition)).values(head=new))
+  if res.rowcount!=1:raise StaleOperationHeadError(f'stale hosted head: expected {expected!r}, current {self.head(repo)!r}')
+ def put_large_mapping(self,repo,cid,key):
+  from sqlalchemy import insert,select,and_
+  from sqlalchemy.exc import IntegrityError
+  created=True
+  try:
+   with self.engine.begin() as c:c.execute(insert(self.large).values(repo=repo,content_id=cid,manifest_key=key))
+  except IntegrityError:created=False
+  with self.engine.connect() as c:r=c.execute(select(self.large.c.manifest_key).where(and_(self.large.c.repo==repo,self.large.c.content_id==cid))).first()
+  if not r or r[0]!=key:raise BackendError('large content mapping collision')
+  return created
+ def get_large_mapping(self,repo,cid):
+  from sqlalchemy import select,and_
+  with self.engine.connect() as c:r=c.execute(select(self.large.c.manifest_key).where(and_(self.large.c.repo==repo,self.large.c.content_id==cid))).first()
+  if not r:raise MappingNotFound(cid)
+  return r[0]

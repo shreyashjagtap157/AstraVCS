@@ -1,0 +1,200 @@
+"""Dialect-neutral shared control-plane stores for multi-node AstraVCS hosting.
+
+SQLAlchemy Core defines transactional metadata semantics once for SQLite
+conformance and PostgreSQL production deployments. Immutable package/workspace
+bytes are delegated to the existing BlobBackend contract.
+"""
+from __future__ import annotations
+from dataclasses import dataclass
+from hashlib import sha256
+import fnmatch,json,secrets,time,uuid
+from sqlalchemy import (MetaData,Table,Column,String,Integer,Text,select,insert,update,
+                        UniqueConstraint,create_engine,and_,or_)
+from sqlalchemy.exc import IntegrityError
+from astra_security import Principal,Grant,AuthenticationError,AuthorizationError
+from astra_platform import PlatformError
+from astra_agents import AgentError,AgentSpec
+from astra_packages import PackageError,PackageVersion
+from astra_workspace_manifest import WorkspaceManifest,WorkspaceEntry,WorkspaceManifestError
+from astra_model import validate_object_id
+
+class SharedControlError(RuntimeError):pass
+
+class SharedControlPlane:
+ def __init__(self,url:str,blob_backend):
+  self.engine=create_engine(url,future=True,pool_pre_ping=True)
+  self.blobs=blob_backend;self.meta=MetaData()
+  self.tokens=Table('cp_tokens',self.meta,Column('hash',String(64),primary_key=True),Column('principal',String(256),nullable=False),Column('kind',String(64),nullable=False),Column('grants',Text,nullable=False),Column('expires',Integer),Column('revoked',Integer,nullable=False,default=0))
+  self.proposals=Table('cp_proposals',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('target_ref',Text),Column('target_revision',String(64)),Column('source_revision',String(64)),Column('status',String(32)),Column('created_by',String(256)),Column('created_at',Integer))
+  self.reviews=Table('cp_reviews',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('reviewer',String(256)),Column('state',String(32)),Column('body',Text),Column('created_at',Integer))
+  self.checks=Table('cp_checks',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('name',String(256)),Column('status',String(32)),Column('conclusion',String(32)),Column('details',Text),Column('updated_at',Integer),UniqueConstraint('proposal_id','name',name='uq_cp_check'))
+  self.events_t=Table('cp_events',self.meta,Column('seq',Integer,primary_key=True,autoincrement=True),Column('type',String(128)),Column('repo',String(256)),Column('actor',String(256)),Column('payload',Text),Column('created_at',Integer))
+  self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
+  self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
+  self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
+  self.meta.create_all(self.engine)
+  self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self)
+ def close(self):self.engine.dispose()
+
+class SQLTokenStore:
+ def __init__(self,cp):self.cp=cp
+ def close(self):pass
+ def issue(self,principal:Principal,grants:list[Grant],ttl_seconds:int|None=3600):
+  token=secrets.token_urlsafe(32);h=sha256(token.encode()).hexdigest();exp=None if ttl_seconds is None else int(time.time())+ttl_seconds
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.tokens).values(hash=h,principal=principal.principal_id,kind=principal.kind,grants=json.dumps([[g.capability,g.resource] for g in grants],separators=(',',':')),expires=exp,revoked=0))
+  return token
+ def revoke(self,token):
+  with self.cp.engine.begin() as c:c.execute(update(self.cp.tokens).where(self.cp.tokens.c.hash==sha256(token.encode()).hexdigest()).values(revoked=1))
+ def authenticate(self,token):
+  h=sha256(token.encode()).hexdigest()
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.tokens).where(self.cp.tokens.c.hash==h)).mappings().first()
+  if not r or r['revoked']:raise AuthenticationError('invalid or revoked token')
+  if r['expires'] is not None and r['expires']<int(time.time()):raise AuthenticationError('expired token')
+  return Principal(r['principal'],r['kind']),tuple(Grant(*x) for x in json.loads(r['grants']))
+ def require(self,token,capability,resource='*'):
+  principal,grants=self.authenticate(token)
+  if not any((g.capability==capability or g.capability=='*') and fnmatch.fnmatchcase(resource,g.resource) for g in grants):raise AuthorizationError(f'missing capability {capability} on {resource}')
+  return principal
+
+class SQLCollaborationStore:
+ def __init__(self,cp):self.cp=cp
+ def close(self):pass
+ def emit(self,event_type,repo,actor,payload):
+  with self.cp.engine.begin() as c:
+   res=c.execute(insert(self.cp.events_t).values(type=event_type,repo=repo,actor=actor,payload=json.dumps(payload,sort_keys=True,separators=(',',':')),created_at=int(time.time())))
+   return res.inserted_primary_key[0]
+ def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None):
+  pid=str(uuid.uuid4());now=int(time.time())
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.proposals).values(id=pid,repo=repo,target_ref=target_ref,target_revision=target_revision,source_revision=source_revision,status='open',created_by=actor,created_at=now))
+  self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision});return pid
+ def get_proposal(self,pid):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.proposals).where(self.cp.proposals.c.id==pid)).mappings().first();return None if r is None else dict(r)
+ def list_proposals(self,repo,status='open'):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.proposals).where(and_(self.cp.proposals.c.repo==repo,self.cp.proposals.c.status==status)).order_by(self.cp.proposals.c.created_at,self.cp.proposals.c.id)).mappings()]
+ def add_review(self,pid,reviewer,state,body=''):
+  if state not in ('approved','changes_requested','commented'):raise PlatformError('invalid review state')
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.reviews).values(proposal_id=pid,reviewer=reviewer,state=state,body=body,created_at=int(time.time())))
+  self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+ def set_check(self,pid,name,status,conclusion=None,details=''):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   row=c.execute(select(self.cp.checks.c.id).where(and_(self.cp.checks.c.proposal_id==pid,self.cp.checks.c.name==name))).first()
+   if row:c.execute(update(self.cp.checks).where(self.cp.checks.c.id==row[0]).values(status=status,conclusion=conclusion,details=details,updated_at=now))
+   else:c.execute(insert(self.cp.checks).values(proposal_id=pid,name=name,status=status,conclusion=conclusion,details=details,updated_at=now))
+  self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion})
+ def policy_evidence(self,pid):
+  with self.cp.engine.connect() as c:
+   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(self.cp.reviews.c.proposal_id==pid)).mappings()];checks={x['name']:dict(x) for x in c.execute(select(self.cp.checks).where(self.cp.checks.c.proposal_id==pid)).mappings()}
+  return {'reviews':reviews,'checks':checks}
+ def require_policy(self,pid,policy):
+  evidence=self.policy_evidence(pid);latest={}
+  for r in evidence['reviews']:latest[r['reviewer']]=r['state']
+  approvals=sum(1 for state in latest.values() if state=='approved')
+  if approvals<policy.required_reviews:raise PlatformError(f'proposal requires {policy.required_reviews} approvals; has {approvals}')
+  for name in policy.required_checks:
+   c=evidence['checks'].get(name)
+   if not c or c.get('status')!='completed' or c.get('conclusion')!='success':raise PlatformError(f'required check {name} has not succeeded')
+  return True
+ def close_proposal(self,pid,actor,state='merged'):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  with self.cp.engine.begin() as c:c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(status=state))
+  self.emit('proposal.'+state,p['repo'],actor,{'proposal_id':pid})
+ def events(self,after=0,limit=100):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.events_t).where(self.cp.events_t.c.seq>after).order_by(self.cp.events_t.c.seq).limit(limit)).mappings()]
+
+class SQLAgentJobStore:
+ def __init__(self,cp):self.cp=cp
+ def close(self):pass
+ def create(self,spec:AgentSpec):
+  if spec.network_policy not in ('deny','allowlist','unrestricted'):raise AgentError('invalid network policy')
+  jid=str(uuid.uuid4());now=int(time.time())
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.jobs).values(id=jid,repo=spec.repository,input_revision=spec.input_revision,task=spec.task,capabilities=json.dumps(spec.capabilities),network_policy=spec.network_policy,status='queued',result=None,created=now,updated=now,worker_id=None,lease_until=None,attempts=0))
+  return jid
+ def get(self,jid):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.jobs).where(self.cp.jobs.c.id==jid)).mappings().first();return None if r is None else dict(r)
+ def claim(self,jid,*,worker_id=None,lease_seconds=60):
+  if lease_seconds<1:raise AgentError('lease_seconds must be positive')
+  worker_id=worker_id or str(uuid.uuid4());now=int(time.time());until=now+lease_seconds
+  # Portable optimistic CAS: update only a queued or expired row, then inspect ownership.
+  with self.cp.engine.begin() as c:
+   res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,or_(self.cp.jobs.c.status=='queued',and_(self.cp.jobs.c.status=='running',self.cp.jobs.c.lease_until!=None,self.cp.jobs.c.lease_until<=now)))).values(status='running',worker_id=worker_id,lease_until=until,attempts=self.cp.jobs.c.attempts+1,updated=now))
+   if res.rowcount!=1:
+    row=c.execute(select(self.cp.jobs.c.id).where(self.cp.jobs.c.id==jid)).first()
+    if row is None:raise AgentError('job not found')
+    raise AgentError('agent job is not queued or reclaimable')
+  out=self.get(jid);out['_claim_worker_id']=worker_id;return out
+ def heartbeat(self,jid,worker_id,*,lease_seconds=60):
+  now=int(time.time())
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.lease_until>now)).values(lease_until=now+lease_seconds,updated=now))
+  if res.rowcount!=1:raise AgentError('agent job lease is expired or not owned by this worker')
+  return self.get(jid)
+ def finish(self,jid,status,result,*,worker_id=None):
+  if status not in ('completed','failed','no_change','needs_rebase'):raise AgentError('invalid terminal job status')
+  cond=and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running')
+  if worker_id is not None:cond=and_(cond,self.cp.jobs.c.worker_id==worker_id)
+  else:cond=and_(self.cp.jobs.c.worker_id==None,self.cp.jobs.c.status!='running')
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(cond).values(status=status,result=json.dumps(result,sort_keys=True),updated=int(time.time()),worker_id=None,lease_until=None))
+  if res.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
+  return self.get(jid)
+ def run(self,jid,runtime,workspace,*,production=False,finalize=True,worker_id=None,lease_seconds=60):
+  row=self.get(jid)
+  if not row:raise AgentError('job not found')
+  if production and runtime.isolation_level.startswith('development'):raise AgentError('development agent runtime cannot satisfy production isolation')
+  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim=row.pop('_claim_worker_id');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'])
+  try:result=runtime.execute(spec,workspace)
+  except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim)
+  if finalize:return self.finish(jid,'completed',result,worker_id=claim)
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==claim)).values(result=json.dumps(result,sort_keys=True),updated=int(time.time())))
+  if res.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
+  out=self.get(jid);out['_claim_worker_id']=claim;return out
+
+class SQLPackageRegistry:
+ def __init__(self,cp):self.cp=cp
+ def close(self):pass
+ def _validate(self,*parts):
+  for x in parts:
+   if not x or len(x)>256 or '/' in x or '\\' in x or x in ('.','..'):raise PackageError('invalid package coordinate')
+ def publish(self,namespace,name,version,filename,data):
+  self._validate(namespace,name,version,filename);digest=sha256(data).hexdigest();self.cp.blobs.put(digest,data);now=int(time.time())
+  try:
+   with self.cp.engine.begin() as c:c.execute(insert(self.cp.packages_t).values(namespace=namespace,name=name,version=version,filename=filename,digest=digest,size=len(data),created=now))
+  except IntegrityError:
+   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.packages_t).where(and_(self.cp.packages_t.c.namespace==namespace,self.cp.packages_t.c.name==name,self.cp.packages_t.c.version==version,self.cp.packages_t.c.filename==filename))).mappings().first()
+   if not r or r['digest']!=digest:raise PackageError('package version is immutable')
+   now=r['created']
+  return PackageVersion(namespace,name,version,filename,digest,len(data),now)
+ def get(self,namespace,name,version,filename):
+  self._validate(namespace,name,version,filename)
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.packages_t).where(and_(self.cp.packages_t.c.namespace==namespace,self.cp.packages_t.c.name==name,self.cp.packages_t.c.version==version,self.cp.packages_t.c.filename==filename))).mappings().first()
+  if not r:raise PackageError('package not found')
+  data=self.cp.blobs.get(r['digest'])
+  if len(data)!=r['size'] or sha256(data).hexdigest()!=r['digest']:raise PackageError('package blob corrupt')
+  return PackageVersion(namespace,name,version,filename,r['digest'],r['size'],r['created']),data
+ def list_versions(self,namespace,name):
+  self._validate(namespace,name)
+  with self.cp.engine.connect() as c:rows=c.execute(select(self.cp.packages_t).where(and_(self.cp.packages_t.c.namespace==namespace,self.cp.packages_t.c.name==name)).order_by(self.cp.packages_t.c.created,self.cp.packages_t.c.version,self.cp.packages_t.c.filename)).mappings();return tuple(PackageVersion(r['namespace'],r['name'],r['version'],r['filename'],r['digest'],r['size'],r['created']) for r in rows)
+
+class SQLWorkspaceManifestStore:
+ def __init__(self,cp):self.cp=cp
+ def put(self,m:WorkspaceManifest):
+  data=m.canonical();oid=m.manifest_id;raw=(json.dumps(data,sort_keys=True,separators=(',',':'))+'\n').encode();self.cp.blobs.put(oid,raw)
+  try:
+   with self.cp.engine.begin() as c:c.execute(insert(self.cp.workspaces_t).values(id=oid,name=m.name,blob_key=oid,created=int(time.time())))
+  except IntegrityError:pass
+  return oid
+ def get(self,oid):
+  validate_object_id(oid,'WorkspaceManifestID')
+  try:d=json.loads(self.cp.blobs.get(oid))
+  except Exception as exc:raise WorkspaceManifestError('workspace manifest unavailable/corrupt') from exc
+  m=WorkspaceManifest(d['name'],tuple(WorkspaceEntry(*x) for x in d['entries']))
+  if m.manifest_id!=oid:raise WorkspaceManifestError('workspace manifest identity mismatch')
+  return m
+ def verify(self,m,registry):
+  from astra_codec import ObjectType
+  for e in m.entries:registry.open(e.repository).get(ObjectType.REVISION,e.revision)
+  return True
