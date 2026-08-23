@@ -2,57 +2,30 @@
 
 ## Version
 
-`v0.0.6`
+`v0.21.0`
 
 ## Truthful implementation state
 
-AstraVCS remains in semantic/bootstrap-repository implementation. It is not yet a usable production VCS.
+AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is self-host qualification capable and includes local VCS semantics, durable storage/recovery, Git round-trip interoperability, merge/conflicts, sparse/lazy workspaces, resumable synchronization, hosted APIs, shared SQL control-plane/repository backends, collaboration, issues, packages, enterprise identity, plugins/AI/agents, SDK/client surfaces, Mission Assurance primitives, soak testing, and independent conformance checks. It is not yet declared 1.0/mission-certified.
 
-## Implemented in this repository
+## Current milestone
 
-- Organized project structure and Git bootstrap repository.
-- Corrected master plan plus adversarial architecture reconciliation.
-- Reference semantic objects: Content, Tree, Revision, Change/ChangeVersion, Node, Conflict, RepositoryView, Operation.
-- Rules for amendment, rebase identity preservation, rename/copy identity, deterministic conflict identity, and operation undo.
-- Initial Rust `astra-model` crate mirroring core structures.
-- Executable Python invariant suite.
-- Shared canonical identity, codec, and loose-store compatibility vectors.
-- Strict bootstrap ObjectEnvelope framing in Python and Rust.
-- Semantic validation for bootstrap paths, identifiers, nodes, Trees, Revisions, RepositoryViews, Operations, and Conflicts.
-- Compare-and-swap repository operation-head publication and divergent-operation recording.
-- First durable bootstrap loose-object CAS reference implementation.
-- Dedicated Rust `astra-store` crate mirroring the loose-store semantics.
-- Domain-separated physical `StoreKey` explicitly separated from semantic repository IDs.
-- Atomic same-filesystem hard-link publication from a fully-written + fsynced temporary object.
-- Idempotent duplicate writes with winner verification.
-- Corrupt-object detection, quarantine, repair-on-put, scrub, and temporary-residue cleanup.
-- Concurrent duplicate writer convergence tests and pre/post-publication fault tests.
-- Canonical bootstrap semantic serialization/deserialization for Content, Tree, ChangeVersion, Revision, RepositoryView, Operation, and Conflict.
-- Shared semantic serialization vectors containing semantic IDs, full envelopes, and StoreKeys.
-- `.astra` repository initialization with durable bootstrap format marker and semantic mapping layer.
-- Semantic-object put/get through semantic IDs while retaining StoreKey as a physical implementation detail.
-- Repository-level `fsck` covering mappings, physical objects, object types, canonical decoding, recomputed semantic identity, and orphan objects.
-- Safe recovery of healthy orphan store objects left by interruption between CAS publication and semantic mapping publication.
+`v0.21.0` closes the common two-tip repository Operation divergence gap. Compatible ref/workspace edits reconcile deterministically into a two-parent Operation; incompatible edits persist a local reconciliation-conflict record and leave the current head unchanged. Three-or-more tips remain fail-closed until a generalized operation-merge design is qualified.
 
-## Validation completed in the current environment
+## Validation available in this environment
 
-- Python reference/codec/validation/store/repository suite: 61/61 passing with warnings promoted to errors.
-- Python syntax compilation passes.
-- Checked-in identity, codec, store, and semantic-serialization vectors reproduce byte-for-byte from Python generators.
-- Git whitespace/diff validation passes.
-- Additional storage stress pass: 40 rounds × 24 concurrent writers, each followed by corruption, scrub/quarantine, republish, and read-back verification.
-- Repository persistence stress pass: 30 rounds × 32 concurrent semantic writers, each converging to one semantic ID, one StoreKey, one healthy mapping, and zero orphan objects.
+- Python reference/product regression suite with ResourceWarning promoted to errors.
+- Independent canonical-format conformance implementation.
+- Git dual-control self-host qualification and portable bundle restore.
+- TypeScript web/desktop/SDK typechecks.
+- Go SDK tests and Java SDK compilation.
+- Deterministic benchmark and soak tooling.
+- Release/version consistency gates.
 
-## Validation not available here
+## Explicit remaining qualification gaps
 
-The current environment has no Rust toolchain (`cargo`, `rustc`, `rustfmt`, and Clippy are unavailable). Rust compilation, formatting, Clippy, and Rust unit tests are therefore **not claimed as passing**. Rust store tests and shared vectors are authored for execution as soon as a Rust-enabled environment is available.
-
-Windows directory durability for the Rust loose store is also not yet claimed. The current implementation explicitly documents this compatibility gap rather than pretending POSIX `fsync` behavior is portable.
-
-## Bootstrap remote status
-
-The repository is reconstructed from the latest milestone bundle when persistent `.git` metadata is unavailable. No writable external Git remote is configured, so milestones can be committed/tagged locally and exported as bundles but cannot truthfully be pushed to an external remote.
-
-## Next implementation target
-
-After `v0.0.6` is committed and verified, `v0.0.7` should persist repository operation/view heads transactionally on top of the semantic repository layer, add durable ref/workspace-head state and startup recovery, and begin a minimal local repository API suitable for the first CLI without introducing packed storage or network synchronization prematurely.
+- Rust toolchain execution remains unavailable in this runtime, so Rust compilation, rustfmt, Clippy, Rust fuzzing, and Rust unit tests are not claimed.
+- Live PostgreSQL/S3 production-service qualification is separate from the executable SQLite/dialect-neutral conformance backends.
+- Windows-specific directory fsync/durability semantics remain unclaimed in the Rust loose-store mirror.
+- Generalized reconciliation of three-or-more divergent Operation tips remains fail-closed.
+- External mission/agency certification cannot be self-declared by the implementation.

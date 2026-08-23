@@ -22,7 +22,7 @@ def main(argv=None)->int:
     x=sub.add_parser('switch'); x.add_argument('name'); x.add_argument('--force',action='store_true')
     x=sub.add_parser('cherry-pick'); x.add_argument('revision')
     x=sub.add_parser('rebase'); x.add_argument('onto')
-    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('head')
+    sub.add_parser('fsck'); sub.add_parser('recover-head'); sub.add_parser('reconcile-head'); sub.add_parser('head')
     a=p.parse_args(argv)
     try:
         if a.cmd=='init': AstraRepository.init(a.path); print(f'initialized AstraVCS repository in {Path(a.path).resolve()}'); return 0
@@ -61,6 +61,8 @@ def main(argv=None)->int:
             r=repo.fsck(); print(r); verify_revision_links(repo,ws.head()) if ws.head() else None
             return 0 if r.ok else 2
         elif a.cmd=='recover-head': print(repo.recover_operation_head() or '')
+        elif a.cmd=='reconcile-head':
+            result=repo.reconcile_operation_heads(); print(result.operation_id or result.conflict_path or '')
         elif a.cmd=='head': print(ws.head() or '')
         return 0
     except Exception as exc:

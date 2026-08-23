@@ -1,3 +1,12 @@
+## 0.21.0 - Divergent Operation Reconciliation
+
+- Added deterministic three-way reconciliation for exactly two divergent repository Operation tips.
+- Disjoint ref/workspace mutations merge into a two-parent reconciliation Operation while preserving immutable View/Operation history.
+- Same-name incompatible ref/workspace changes fail closed and persist a durable local reconciliation-conflict record without moving the operation head.
+- Three-or-more tips and ambiguous operation merge bases remain explicit failures rather than being folded by an unqualified algorithm.
+- Added `astra reconcile-head` porcelain and regression coverage for clean reconciliation, conflict persistence, and multi-tip refusal.
+- Full executable regression passes at 168 Python tests before release qualification.
+
 ## 0.20.0 - Native Issues and Comments
 
 - Added durable issue/comment lifecycle to SQLite and dialect-neutral shared collaboration stores.

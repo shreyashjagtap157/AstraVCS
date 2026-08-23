@@ -535,3 +535,124 @@ def get_content_with_promises(self: AstraRepository, content_oid: str) -> bytes:
 
 AstraRepository.set_content_fetcher = set_content_fetcher
 AstraRepository.get_content = get_content_with_promises
+
+# --- Divergent operation-head reconciliation (v0.21 extension) ---
+import json
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class OperationReconcileResult:
+    operation_id: str | None
+    merged: bool
+    conflict_path: str | None = None
+
+
+def _operation_graph(self: AstraRepository):
+    operations: dict[str, Operation] = {}
+    parents: set[str] = set()
+    for typ, oid, _ in self.iter_mappings():
+        if typ != ObjectType.OPERATION:
+            continue
+        try:
+            op = self.get(typ, oid)
+        except RepositoryError:
+            continue
+        if isinstance(op, Operation):
+            operations[oid] = op
+            parents.update(op.parents)
+    return operations, sorted(set(operations) - parents)
+
+
+def _operation_ancestors(operations: dict[str, Operation], start: str) -> dict[str, int]:
+    distance = {start: 0}
+    queue = [start]
+    while queue:
+        cur = queue.pop(0)
+        for parent in operations[cur].parents:
+            if parent in operations and parent not in distance:
+                distance[parent] = distance[cur] + 1
+                queue.append(parent)
+    return distance
+
+
+def _operation_lca(operations: dict[str, Operation], left: str, right: str) -> str | None:
+    la = _operation_ancestors(operations, left)
+    ra = _operation_ancestors(operations, right)
+    common = set(la) & set(ra)
+    if not common:
+        return None
+    ranked = sorted(common, key=lambda oid: (max(la[oid], ra[oid]), la[oid] + ra[oid], oid))
+    best = ranked[0]
+    # Refuse genuinely ambiguous equally-ranked LCAs.
+    score = (max(la[best], ra[best]), la[best] + ra[best])
+    if sum(1 for oid in ranked if (max(la[oid], ra[oid]), la[oid] + ra[oid]) == score) > 1:
+        raise StateCorruptionError("ambiguous operation merge base")
+    return best
+
+
+def _merge_view_map(base_items, left_items, right_items, label: str):
+    base = dict(base_items); left = dict(left_items); right = dict(right_items)
+    missing = object(); merged = {}; conflicts = []
+    for name in sorted(set(base) | set(left) | set(right)):
+        b = base.get(name, missing); l = left.get(name, missing); r = right.get(name, missing)
+        if l == r: chosen = l
+        elif l == b: chosen = r
+        elif r == b: chosen = l
+        else:
+            conflicts.append({
+                "kind": label,
+                "name_hex": name.hex(),
+                "base": None if b is missing else b,
+                "left": None if l is missing else l,
+                "right": None if r is missing else r,
+            })
+            continue
+        if chosen is not missing:
+            merged[name] = chosen
+    return merged, conflicts
+
+
+def _write_reconcile_conflict(self: AstraRepository, left: str, right: str, base: str | None, conflicts: list[dict]) -> str:
+    state, _head, _lock = _state_paths(self)
+    path = state / "operation-reconcile-conflict.json"
+    payload = json.dumps({"left": left, "right": right, "base": base, "conflicts": conflicts}, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    _atomic_replace(self, path, payload)
+    return str(path)
+
+
+def reconcile_operation_heads(self: AstraRepository) -> OperationReconcileResult:
+    _ensure_state(self)
+    state, head_path, lock_path = _state_paths(self)
+    with _exclusive_file_lock(lock_path):
+        operations, tips = _operation_graph(self)
+        if not tips:
+            return OperationReconcileResult(None, False)
+        if len(tips) == 1:
+            current = operation_head(self)
+            if current != tips[0]:
+                _atomic_replace(self, head_path, (tips[0] + "\n").encode("ascii"))
+            return OperationReconcileResult(tips[0], False)
+        if len(tips) != 2:
+            raise StateCorruptionError(f"operation reconciliation requires exactly two tips; candidates={len(tips)}")
+        left, right = tips
+        base_id = _operation_lca(operations, left, right)
+        base_view = RepositoryView.create() if base_id is None else self.get(ObjectType.VIEW, operations[base_id].view_id)
+        left_view = self.get(ObjectType.VIEW, operations[left].view_id)
+        right_view = self.get(ObjectType.VIEW, operations[right].view_id)
+        refs, ref_conflicts = _merge_view_map(base_view.refs, left_view.refs, right_view.refs, "ref")
+        workspaces, ws_conflicts = _merge_view_map(base_view.workspace_heads, left_view.workspace_heads, right_view.workspace_heads, "workspace")
+        conflicts = ref_conflicts + ws_conflicts
+        conflict_file = state / "operation-reconcile-conflict.json"
+        if conflicts:
+            path = _write_reconcile_conflict(self, left, right, base_id, conflicts)
+            return OperationReconcileResult(None, False, path)
+        merged_view = RepositoryView.create(refs, workspaces)
+        self.put(merged_view)
+        op = Operation((left, right), merged_view.view_id, b"reconcile-operation-heads")
+        self.put(op)
+        _atomic_replace(self, head_path, (op.operation_id + "\n").encode("ascii"))
+        if conflict_file.exists():
+            conflict_file.unlink(); self._fsync_dir(conflict_file.parent)
+        return OperationReconcileResult(op.operation_id, True)
+
+AstraRepository.reconcile_operation_heads = reconcile_operation_heads
