@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def run(cmd,cwd=ROOT):print('+',' '.join(cmd));subprocess.run(cmd,cwd=cwd,check=True)
 def main():
  run([sys.executable,'-W','error::ResourceWarning','-m','unittest','discover','-s','tests/reference','-q'])
- run([sys.executable,'-m','compileall','-q','reference','tests/reference'])
+ run([sys.executable,'-m','compileall','-q','reference','conformance','tests/reference'])
  run(['git','diff','--check'])
  run([sys.executable,'tools/check_versions.py'])
  for d in ['apps/web','apps/desktop','sdk/typescript']:run(['npx','--yes','tsc','--noEmit'],ROOT/d)

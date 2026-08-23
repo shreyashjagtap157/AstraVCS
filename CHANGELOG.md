@@ -1,3 +1,12 @@
+## 0.17.0 - Independent Conformance and State-Model Qualification
+
+- Added a dependency-isolated canonical envelope/semantic verifier that does not import Astra model/codec/repository modules.
+- Independent verifier recomputes Content, Tree, ChangeVersion, and Revision identities for bootstrap schema v0/v1.
+- Added independent malformed/trailing/mutation conformance tests.
+- Added executable leased-agent state model with bounded exhaustive interleavings, single-completion invariant, and stale-owner rejection after reclaim.
+- Central validation now byte-compiles the independent conformance implementation.
+- Full executable regression passes at 162 Python tests; Rust remains explicitly deferred because the environment cannot resolve/install a toolchain.
+
 ## 0.16.0 - Dialect-Neutral Shared Hosting and HA Deployment
 
 - Added SQLAlchemy-based shared repository metadata with atomic conditional operation-head CAS and dialect-neutral schema.
