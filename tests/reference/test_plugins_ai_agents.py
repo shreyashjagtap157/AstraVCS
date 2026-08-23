@@ -161,3 +161,14 @@ class DaemonSessionSecurityTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as td:
    d=AstraDaemon(AstraRepository.init(td))
    with self.assertRaises(DaemonError):d.serve('0.0.0.0',0)
+
+class PluginLifecycleTests(unittest.TestCase):
+ def test_disable_rotate_uninstall_lifecycle(self):
+  import tempfile
+  from pathlib import Path
+  from astra_plugins import PluginRegistry,PluginManifest,PluginError
+  with tempfile.TemporaryDirectory() as td:
+   r=PluginRegistry(Path(td)/'p.db');old=r.install(PluginManifest('demo','1','remote',('repo.read',),'https://x'),('repo.read',))
+   self.assertEqual(len(r.list()),1);r.set_enabled('demo',False)
+   with self.assertRaises(PluginError):r.require('demo','repo.read')
+   r.set_enabled('demo',True);new=r.rotate_secret('demo');self.assertNotEqual(old,new);r.require('demo','repo.read');r.uninstall('demo');self.assertIsNone(r.installed('demo'));r.close()

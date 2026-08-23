@@ -47,3 +47,18 @@ class PluginRegistry:
   row=self.db.execute('SELECT secret FROM plugins WHERE id=?',(plugin_id,)).fetchone()
   if not row:return False
   expected=hmac.new(bytes.fromhex(row['secret']),body,sha256).hexdigest();return hmac.compare_digest(expected,signature)
+ def list(self):
+  rows=self.db.execute('SELECT * FROM plugins ORDER BY id').fetchall();out=[]
+  for row in rows:
+   d=dict(row);d['requested']=json.loads(d['requested']);d['granted']=json.loads(d['granted']);d.pop('secret');out.append(d)
+  return out
+ def set_enabled(self,plugin_id:str,enabled:bool):
+  cur=self.db.execute('UPDATE plugins SET enabled=?,updated=? WHERE id=?',(1 if enabled else 0,int(time.time()),plugin_id));self.db.commit()
+  if cur.rowcount!=1:raise PluginError('plugin is not installed')
+ def rotate_secret(self,plugin_id:str):
+  secret=secrets.token_hex(32);cur=self.db.execute('UPDATE plugins SET secret=?,updated=? WHERE id=?',(secret,int(time.time()),plugin_id));self.db.commit()
+  if cur.rowcount!=1:raise PluginError('plugin is not installed')
+  return secret
+ def uninstall(self,plugin_id:str):
+  cur=self.db.execute('DELETE FROM plugins WHERE id=?',(plugin_id,));self.db.commit()
+  if cur.rowcount!=1:raise PluginError('plugin is not installed')

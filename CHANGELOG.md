@@ -1,3 +1,13 @@
+## 0.26.0 - Plugin Lifecycle and Signed Marketplace Install
+
+- Added complete installed-plugin lifecycle: list, enable/disable, webhook-secret rotation, and uninstall.
+- Added capability-gated hosted plugin management APIs; secrets are returned only on install/rotation and excluded from read/list responses.
+- Added signed catalog listing/install through a pinned Ed25519-verified PluginCatalog.
+- Catalog installs derive execution model/capability requests from the verified signed entry and still require explicit granted-capability selection.
+- Added typed web client APIs for plugin listing, signed catalog discovery/install, enable/disable, secret rotation, and uninstall.
+- Added lifecycle and hosted signed-catalog regression tests.
+- Full executable regression passes at 182 Python tests plus web/desktop/SDK TypeScript and Go gates.
+
 ## 0.25.0 - Secure Native Daemon Discovery
 
 - Restricted the desktop/IDE local daemon to loopback-only bindings.

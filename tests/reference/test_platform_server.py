@@ -77,3 +77,41 @@ class HTTPResumableSyncTests(unittest.TestCase):
     local=AstraRepository.init(local_td);s=HTTPResumableSyncSession(f'http://{host}:{port}',token,'remote',local);p=s.run(max_items=2);self.assertFalse(p['completed']);self.assertEqual(local.current_view().refs,())
     s2=HTTPResumableSyncSession(f'http://{host}:{port}',token,'remote',local);p=s2.run();self.assertTrue(p['completed']);self.assertIsNotNone(local.get(__import__('astra_codec').ObjectType.REVISION,tip.revision_id));self.assertTrue(local.fsck().ok)
    finally:server.close()
+
+class PluginServerLifecycleTests(unittest.TestCase):
+ def test_capability_gated_plugin_lifecycle(self):
+  import json,tempfile,urllib.request
+  from astra_server import AstraServer
+  from astra_security import TokenStore,Principal,Grant
+  from pathlib import Path
+  with tempfile.TemporaryDirectory() as td:
+   s=AstraServer(td);tok=s.tokens.issue(Principal('admin','human'),[Grant('plugins.read'),Grant('plugins.write')]);host,port=s.serve();base=f'http://{host}:{port}';headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}
+   def req(path,body=None):
+    data=None if body is None else json.dumps(body).encode()
+    with urllib.request.urlopen(urllib.request.Request(base+path,data=data,headers=headers)) as response:return json.loads(response.read())
+   try:
+    created=req('/v1/plugins',{'plugin_id':'demo','version':'1','execution_model':'remote','requested_capabilities':['repo.read'],'granted_capabilities':['repo.read'],'entrypoint':'https://x'});self.assertIn('secret',created);self.assertNotIn('secret',req('/v1/plugins')['plugins'][0])
+    req('/v1/plugins/demo/disable',{});self.assertEqual(req('/v1/plugins/demo')['plugin']['enabled'],0)
+    rotated=req('/v1/plugins/demo/rotate-secret',{});self.assertNotEqual(rotated['secret'],created['secret'])
+    req('/v1/plugins/demo/uninstall',{})
+   finally:s.close()
+
+class SignedCatalogInstallTests(unittest.TestCase):
+ def test_only_verified_catalog_entry_can_be_installed(self):
+  import json,tempfile,urllib.request
+  from astra_server import AstraServer
+  from astra_security import Principal,Grant
+  from astra_automation import PluginCatalog
+  from astra_assurance import generate_keypair
+  with tempfile.TemporaryDirectory() as td:
+   private,public=generate_keypair();catalog=PluginCatalog(public)
+   entry={'plugin_id':'catalog.demo','version':'1.0.0','execution_model':'remote','requested_capabilities':['repo.read'],'entrypoint':'https://example.invalid','digest':'44'*32}
+   raw,sig,kid=PluginCatalog.signed_entry(private,entry);catalog.add(raw,sig,kid)
+   s=AstraServer(td,plugin_catalog=catalog);tok=s.tokens.issue(Principal('admin','human'),[Grant('plugins.write'),Grant('plugins.read'),Grant('plugins.catalog.read')]);host,port=s.serve();base=f'http://{host}:{port}';headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}
+   def req(path,body=None):
+    data=None if body is None else json.dumps(body).encode()
+    with urllib.request.urlopen(urllib.request.Request(base+path,data=data,headers=headers)) as response:return json.loads(response.read())
+   try:
+    self.assertEqual(req('/v1/plugin-catalog')['entries'][0]['plugin_id'],'catalog.demo')
+    installed=req('/v1/plugin-catalog/install',{'plugin_id':'catalog.demo','version':'1.0.0','granted_capabilities':['repo.read']});self.assertEqual(installed['catalog_digest'],'44'*32);self.assertEqual(installed['plugin']['id'],'catalog.demo')
+   finally:s.close()

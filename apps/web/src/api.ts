@@ -8,6 +8,9 @@ export interface Issue { id:number; repo:string; title:string; body:string; stat
 export interface IssueComment { id:number; issue_id:number; author:string; body:string; created_at:number }
 export interface PackageVersion { namespace:string; name:string; version:string; filename:string; digest:string; size:number; created_at:number }
 export interface PlatformEvent { id:number; type:string; repo:string|null; actor:string; payload:string|Record<string,unknown>; created_at:number }
+
+export interface PluginRecord { id:string; version:string; model:string; entrypoint:string; requested:string[]; granted:string[]; enabled:number; updated:number }
+export interface PluginCatalogEntry { plugin_id:string; version:string; execution_model:string; requested_capabilities:string[]; entrypoint:string; digest?:string }
 export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
   constructor(private readonly base:string, private token:string) {}
@@ -34,4 +37,10 @@ export class AstraApi {
   closeIssue(repo:string,id:number):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues/${id}/close`,{method:'POST',body:'{}'})}
   packages(namespace:string,name:string):Promise<{packages:PackageVersion[]}>{return this.request(`/v1/packages/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`)}
   events(after=0):Promise<{events:PlatformEvent[]}>{return this.request(`/v1/events?after=${after}`)}
+  plugins():Promise<{plugins:PluginRecord[]}>{return this.request('/v1/plugins')}
+  pluginCatalog():Promise<{entries:PluginCatalogEntry[]}>{return this.request('/v1/plugin-catalog')}
+  installCatalogPlugin(pluginId:string,version:string,grantedCapabilities:string[]):Promise<{plugin:PluginRecord;secret:string;catalog_digest?:string}>{return this.request('/v1/plugin-catalog/install',{method:'POST',body:JSON.stringify({plugin_id:pluginId,version,granted_capabilities:grantedCapabilities})})}
+  setPluginEnabled(pluginId:string,enabled:boolean):Promise<{ok:boolean}>{return this.request(`/v1/plugins/${encodeURIComponent(pluginId)}/${enabled?'enable':'disable'}`,{method:'POST',body:'{}'})}
+  rotatePluginSecret(pluginId:string):Promise<{secret:string}>{return this.request(`/v1/plugins/${encodeURIComponent(pluginId)}/rotate-secret`,{method:'POST',body:'{}'})}
+  uninstallPlugin(pluginId:string):Promise<{ok:boolean}>{return this.request(`/v1/plugins/${encodeURIComponent(pluginId)}/uninstall`,{method:'POST',body:'{}'})}
 }

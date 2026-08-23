@@ -69,3 +69,8 @@ class PluginCatalog:
   try:self.public.verify(signature,raw);m=json.loads(raw)
   except Exception as exc:raise AutomationError('invalid catalog signature') from exc
   self.entries[(m['plugin_id'],m['version'])]=m;return m
+ def get(self,plugin_id,version):
+  try:return self.entries[(plugin_id,version)]
+  except KeyError as exc:raise AutomationError('catalog entry not found') from exc
+ def list(self):
+  return [self.entries[k] for k in sorted(self.entries)]
