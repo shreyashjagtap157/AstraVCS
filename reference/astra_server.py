@@ -19,6 +19,7 @@ from astra_packages import PackageRegistry
 from astra_agents import AgentJobStore,AgentSpec,AgentCoordinator
 from astra_version import product_version
 from astra_plugins import PluginRegistry,PluginManifest
+from astra_policy_store import SQLRefPolicyStore
 from astra_automation import PluginCatalog
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
@@ -32,11 +33,11 @@ class RepositoryRegistry:
  def list(self):return sorted(p.name for p in self.root.iterdir() if (p/'.astra').is_dir())
 
 class AstraServer:
- def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,worker_id=None):
+ def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,policy_store=None,worker_id=None):
   self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
   self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=workspaces or WorkspaceManifestStore(self.root/'workspaces');self.packages=packages or PackageRegistry(self.root/'packages');self.agent_jobs=agent_jobs or AgentJobStore(self.root/'agents.sqlite')
   self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
-  self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+  self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self._owns_policy=policy_store is None;self.policy=policy_store or SQLRefPolicyStore('sqlite:///'+str((self.root/'policies.sqlite').resolve()));self.policy.seed(policies or [RefPolicy()]) if hasattr(self.policy,'seed') else None;self.http=None;self.thread=None
  def run_agent_job(self,jid,runtime,*,target_ref='refs/heads/main',production=True):
   return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production,worker_id=self.worker_id)
  def serve(self,host='127.0.0.1',port=0):
@@ -66,6 +67,8 @@ class AstraServer:
       self._require('plugins.read');return self._json(200,{'plugins':outer.plugins.list()})
      if p==['v1','plugin-catalog']:
       self._require('plugins.catalog.read');return self._json(200,{'entries':[] if outer.plugin_catalog is None else outer.plugin_catalog.list()})
+     if p==['v1','policies']:
+      self._require('policies.read');return self._json(200,{'policies':outer.policy.list() if hasattr(outer.policy,'list') else []})
      if len(p)==3 and p[:2]==['v1','plugins']:
       self._require('plugins.read');row=outer.plugins.installed(p[2]);return self._json(404,{'error':'plugin_not_found'}) if row is None else self._json(200,{'plugin':row})
      if len(p)==3 and p[:2]==['v1','agents']:
@@ -131,6 +134,10 @@ class AstraServer:
       self._require('plugins.write');
       if outer.plugin_catalog is None:raise ValueError('plugin catalog is not configured')
       entry=outer.plugin_catalog.get(body['plugin_id'],body['version']);m=PluginManifest(entry['plugin_id'],entry['version'],entry['execution_model'],tuple(entry.get('requested_capabilities',[])),entry.get('entrypoint',''));secret=outer.plugins.install(m,tuple(body.get('granted_capabilities',[])));return self._json(201,{'plugin':outer.plugins.installed(m.plugin_id),'secret':secret,'catalog_digest':entry.get('digest')})
+     if p==['v1','policies','upsert']:
+      principal=self._require('policies.write');policy=RefPolicy(body['pattern'],body.get('required_capability','refs.protected.write'),int(body.get('required_reviews',0)),tuple(body.get('required_checks',[])));row=outer.policy.upsert(policy,priority=int(body.get('priority',0)));outer.platform.emit('policy.updated',None,principal.principal_id,{'pattern':policy.pattern});return self._json(200,{'policy':row})
+     if p==['v1','policies','delete']:
+      principal=self._require('policies.write');outer.policy.delete(body['pattern']);outer.platform.emit('policy.deleted',None,principal.principal_id,{'pattern':body['pattern']});return self._json(200,{'ok':True})
      if p==['v1','plugins']:
       self._require('plugins.write');m=PluginManifest(body['plugin_id'],body['version'],body['execution_model'],tuple(body.get('requested_capabilities',[])),body.get('entrypoint',''));secret=outer.plugins.install(m,tuple(body.get('granted_capabilities',[])));return self._json(201,{'plugin':outer.plugins.installed(m.plugin_id),'secret':secret})
      if len(p)==4 and p[:2]==['v1','plugins'] and p[3] in ('update','enable','disable','rotate-secret','uninstall'):
@@ -200,3 +207,4 @@ class AstraServer:
   if self._owns_packages:self.packages.close()
   if self._owns_agent_jobs:self.agent_jobs.close()
   if self._owns_plugins:self.plugins.close()
+  if self._owns_policy and hasattr(self.policy,'close'):self.policy.close()

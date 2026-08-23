@@ -17,7 +17,7 @@ class SharedHostingRuntime:
   self.control_blobs=self.control_blobs or self.repo_blobs
   self.repo_metadata=SQLAlchemyMetadataBackend(self.db_url);self.registry=HostedRepositoryRegistry(self.repo_metadata,self.repo_blobs);self.control=SharedControlPlane(self.db_url,self.control_blobs)
  def server(self,root,*,worker_id=None,policies=None):
-  return AstraServer(root,policies=policies,registry=self.registry,tokens=self.control.token_store,platform=self.control.platform_store,agent_jobs=self.control.agent_store,packages=self.control.package_store,workspaces=self.control.workspace_store,worker_id=worker_id)
+  return AstraServer(root,policies=policies,registry=self.registry,tokens=self.control.token_store,platform=self.control.platform_store,agent_jobs=self.control.agent_store,packages=self.control.package_store,workspaces=self.control.workspace_store,policy_store=self.control.policy_store,plugins=self.control.plugin_store,worker_id=worker_id)
  def close(self):self.control.close();self.repo_metadata.close()
 
 def shared_runtime_from_env(env=None,*,production=True):

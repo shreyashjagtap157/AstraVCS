@@ -74,3 +74,18 @@ class SharedHostingConfigTests(unittest.TestCase):
   with self.assertRaisesRegex(HostingConfigError,'DATABASE_URL'):shared_runtime_from_env({},production=True)
   with self.assertRaisesRegex(HostingConfigError,'requires PostgreSQL'):shared_runtime_from_env({'ASTRA_DATABASE_URL':'sqlite:///tmp/x.db','ASTRA_S3_BUCKET':'b'},production=True)
   with self.assertRaisesRegex(HostingConfigError,'S3_BUCKET'):shared_runtime_from_env({'ASTRA_DATABASE_URL':'postgresql+psycopg://u:p@db/x'},production=True)
+
+class SharedPluginPolicyControlTests(unittest.TestCase):
+ def test_plugins_and_policies_visible_across_shared_control_instances(self):
+  import tempfile
+  from pathlib import Path
+  from astra_shared_control import SharedControlPlane
+  from astra_backend import FileBlobBackend
+  from astra_plugins import PluginManifest
+  from astra_security import RefPolicy
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str((Path(td)/'cp.db').resolve());blobs=FileBlobBackend(Path(td)/'blobs');a=SharedControlPlane(url,blobs);b=SharedControlPlane(url,blobs)
+   try:
+    a.plugin_store.install(PluginManifest('shared.demo','1','remote',('repo.read',),'https://x'),('repo.read',));self.assertEqual(b.plugin_store.installed('shared.demo')['version'],'1')
+    a.policy_store.upsert(RefPolicy('refs/heads/release/*','refs.protected.write',2,('ci',)),priority=5);self.assertEqual(b.policy_store.policy_for(b'refs/heads/release/x').required_reviews,2)
+   finally:a.close();b.close()

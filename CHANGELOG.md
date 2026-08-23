@@ -1,3 +1,13 @@
+## 0.27.0 - Durable Protected-Ref Policy Control Plane
+
+- Added transactional SQL protected-ref policy storage with deterministic priority/pattern matching and restart persistence.
+- Added capability-gated audited policy list/upsert/delete APIs for required ref capability, approval count, and required checks.
+- Wired policy state into the dialect-neutral shared control plane so independent HA nodes observe the same protection rules.
+- Added a dialect-neutral shared plugin registry so hosted plugin lifecycle/catalog installs no longer diverge between HA nodes.
+- Added typed web client policy-management APIs.
+- Added persistence, audit, shared-node plugin/policy visibility, and policy API regression coverage.
+- Full executable regression passes at 185 Python tests plus web/desktop/SDK TypeScript and Go gates.
+
 ## 0.26.0 - Plugin Lifecycle and Signed Marketplace Install
 
 - Added complete installed-plugin lifecycle: list, enable/disable, webhook-secret rotation, and uninstall.

@@ -17,6 +17,8 @@ from astra_agents import AgentError,AgentSpec
 from astra_packages import PackageError,PackageVersion
 from astra_workspace_manifest import WorkspaceManifest,WorkspaceEntry,WorkspaceManifestError
 from astra_model import validate_object_id
+from astra_policy_store import SQLRefPolicyStore
+from astra_plugins import SQLPluginRegistry
 
 class SharedControlError(RuntimeError):pass
 
@@ -35,7 +37,7 @@ class SharedControlPlane:
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
   self.meta.create_all(self.engine)
-  self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self)
+  self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self);self.policy_store=SQLRefPolicyStore(url,engine=self.engine);self.policy_store.seed([__import__('astra_security').RefPolicy()]);self.plugin_store=SQLPluginRegistry(self.engine)
  def close(self):self.engine.dispose()
 
 class SQLTokenStore:
