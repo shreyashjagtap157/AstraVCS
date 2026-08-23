@@ -326,3 +326,61 @@ def verify_revision_links(repo:AstraRepository, revision_id:str, recursive=True)
                 parent=repo.get(ObjectType.REVISION,rev.parents[0])
                 if cv.tree_before!=parent.tree_id: raise RepositoryError("ChangeVersion tree_before disagrees with parent")
     return True
+
+# Ref/branch porcelain and amend semantics. These build on immutable Revision /
+# ChangeVersion objects and publish through the same RepositoryView CAS path.
+def _validate_branch_name(name: bytes) -> None:
+    if not name or b'\x00' in name or b'\n' in name or name.startswith(b'/') or name.endswith(b'/') or b'..' in name.split(b'/'):
+        raise WorktreeError('invalid branch name')
+
+def list_branches(self: LocalWorkspace):
+    prefix=b'refs/heads/'
+    return tuple(sorted((name[len(prefix):],oid) for name,oid in self.repo.current_view().refs if name.startswith(prefix)))
+
+def create_branch(self: LocalWorkspace,name:bytes,revision_id:str|None=None):
+    _validate_branch_name(name);oid=revision_id or self.head()
+    if not oid:raise WorktreeError('repository has no revision for branch')
+    validate_object_id(oid,'RevisionID');self.repo.get(ObjectType.REVISION,oid)
+    ref=b'refs/heads/'+name;view=self.repo.current_view();refs=dict(view.refs)
+    if ref in refs:raise WorktreeError('branch already exists')
+    refs[ref]=oid;self.repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'branch-create',expected_head=self.repo.operation_head());return oid
+
+def delete_branch(self: LocalWorkspace,name:bytes):
+    _validate_branch_name(name);ref=b'refs/heads/'+name
+    if self.current_ref()==ref:raise WorktreeError('cannot delete the currently checked out branch')
+    view=self.repo.current_view();refs=dict(view.refs)
+    if ref not in refs:raise WorktreeError('branch does not exist')
+    del refs[ref];self.repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'branch-delete',expected_head=self.repo.operation_head())
+
+def switch_branch(self: LocalWorkspace,name:bytes,*,force=False):
+    _validate_branch_name(name);ref=b'refs/heads/'+name;oid=dict(self.repo.current_view().refs).get(ref)
+    if oid is None:raise WorktreeError('branch does not exist')
+    self.checkout(oid,ref=ref,force=force);return oid
+
+def amend(self: LocalWorkspace, message:bytes|None=None, *, author:Attribution|None=None, committer:Attribution|None=None):
+    with self.locked():
+        old_head=self.head()
+        if not old_head:raise WorktreeError('repository has no revision to amend')
+        old_rev=self.repo.get(ObjectType.REVISION,old_head)
+        if not old_rev.change_version_id:raise WorktreeError('current revision has no logical change to amend')
+        old_cv=self.repo.get(ObjectType.CHANGE_VERSION,old_rev.change_version_id)
+        after,index=self.scan(persist_contents=True);self.repo.put(after)
+        new_message=old_cv.message if message is None else message
+        if not new_message:raise WorktreeError('commit message must not be empty')
+        if after.tree_id==old_rev.tree_id and new_message==old_cv.message and author is None and committer is None:
+            raise NothingToCommitError('nothing to amend')
+        cv=old_cv.amend(message=new_message,tree_after=after.tree_id);self.repo.put(cv)
+        now=int(time.time());new_author=author or old_rev.author or Attribution(b'Astra User',b'unknown@local',now,0);new_committer=committer or Attribution(new_author.name,new_author.email,now,new_author.timezone_minutes)
+        rev=Revision(old_rev.parents,after.tree_id,cv.version_id,1,new_author,new_committer);self.repo.put(rev)
+        view=self.repo.current_view();refs=dict(view.refs);heads=dict(view.workspace_heads);heads[WORKSPACE]=rev.revision_id
+        ref=self.current_ref()
+        if ref is not None:
+            if refs.get(ref)!=old_head:raise WorktreeError('current branch advanced before amend')
+            refs[ref]=rev.revision_id
+        self.repo.publish_view(RepositoryView.create(refs,heads),b'amend',expected_head=self.repo.operation_head());self._save_index(index);return CommitResult(rev.revision_id,after.tree_id,cv.version_id)
+
+LocalWorkspace.list_branches=list_branches
+LocalWorkspace.create_branch=create_branch
+LocalWorkspace.delete_branch=delete_branch
+LocalWorkspace.switch_branch=switch_branch
+LocalWorkspace.amend=amend

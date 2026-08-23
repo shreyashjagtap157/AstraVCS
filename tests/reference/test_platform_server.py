@@ -63,3 +63,17 @@ class ProtectedProposalMergeTests(unittest.TestCase):
     with self.assertRaises(urllib.error.HTTPError):post(f'/v1/repos/r/proposals/{p}/merge',{})
     post(f'/v1/repos/r/proposals/{p}/reviews',{'state':'approved'});post(f'/v1/repos/r/proposals/{p}/checks',{'name':'tests','status':'completed','conclusion':'success'});merged=post(f'/v1/repos/r/proposals/{p}/merge',{})['revision'];self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],merged)
    finally:s.close()
+
+class HTTPResumableSyncTests(unittest.TestCase):
+ def test_remote_resumable_plan_and_object_transfer(self):
+  from astra_http_sync import HTTPResumableSyncSession
+  from astra_repository import AstraRepository
+  from astra_security import Principal,Grant
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td,tempfile.TemporaryDirectory() as local_td:
+   server=AstraServer(td);server.registry.create('remote');remote=server.registry.open('remote');rw=LocalWorkspace(remote);(remote.worktree/'x').write_text('one');rw.commit(b'one');(remote.worktree/'x').write_text('two');tip=rw.commit(b'two')
+   token=server.tokens.issue(Principal('sync','service'),[Grant('repo.read','remote')],ttl_seconds=None);host,port=server.serve()
+   try:
+    local=AstraRepository.init(local_td);s=HTTPResumableSyncSession(f'http://{host}:{port}',token,'remote',local);p=s.run(max_items=2);self.assertFalse(p['completed']);self.assertEqual(local.current_view().refs,())
+    s2=HTTPResumableSyncSession(f'http://{host}:{port}',token,'remote',local);p=s2.run();self.assertTrue(p['completed']);self.assertIsNotNone(local.get(__import__('astra_codec').ObjectType.REVISION,tip.revision_id));self.assertTrue(local.fsck().ok)
+   finally:server.close()

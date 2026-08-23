@@ -95,3 +95,15 @@ class SparseWorkspaceTests(unittest.TestCase):
             ws.clear_sparse()
             with self.assertRaises(WorktreeError):
                 ws.checkout(second.revision_id,ref=None,force=True)
+
+class BranchAmendTests(unittest.TestCase):
+    def test_branch_switch_delete_and_amend_preserve_change_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td);repo=AstraRepository.init(root);ws=LocalWorkspace(repo);(root/'a').write_text('one');first=ws.commit(b'first')
+            old_cv=repo.get(ObjectType.CHANGE_VERSION,first.change_version_id)
+            ws.create_branch(b'feature');ws.switch_branch(b'feature');(root/'a').write_text('two');second=ws.commit(b'second')
+            (root/'a').write_text('three');amended=ws.amend(b'second amended');new_cv=repo.get(ObjectType.CHANGE_VERSION,amended.change_version_id)
+            self.assertEqual(old_cv.change_id,repo.get(ObjectType.CHANGE_VERSION,first.change_version_id).change_id)
+            self.assertEqual(repo.get(ObjectType.CHANGE_VERSION,second.change_version_id).change_id,new_cv.change_id)
+            self.assertNotEqual(second.revision_id,amended.revision_id);self.assertEqual((root/'a').read_text(),'three')
+            ws.switch_branch(b'main',force=True);self.assertEqual((root/'a').read_text(),'one');ws.delete_branch(b'feature');self.assertNotIn((b'feature',amended.revision_id),ws.list_branches())

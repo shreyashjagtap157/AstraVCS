@@ -165,3 +165,16 @@ class ResumableSyncSession:
         progress=self.transfer(max_items=max_items)
         if finalize and progress.cursor==progress.total:return self.finalize()
         return progress
+
+def sync_plan_from_dict(data:dict)->SyncPlan:
+    try:
+        if data.get('version')!=1:raise ValueError
+        roots=tuple((bytes.fromhex(name),oid) for name,oid in data['roots'])
+        objects=tuple((str(kind),str(oid)) for kind,oid in data['objects'])
+        promises=tuple(str(x) for x in data.get('promises',[]))
+        prefixes=tuple(bytes.fromhex(x) for x in data.get('path_prefixes',[]))
+        plan=SyncPlan(roots,objects,promises,bool(data['include_content']),prefixes)
+        # Force canonical/hash validation now.
+        _=plan.plan_hash
+        return plan
+    except Exception as exc:raise SyncProtocolError('malformed synchronization plan') from exc

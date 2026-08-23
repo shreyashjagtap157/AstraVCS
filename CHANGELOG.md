@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0 - Change Replay, Organizations and Remote Resumable Sync
+
+- Added branch listing/create/switch/delete porcelain and amend with stable logical ChangeID semantics.
+- Added NodeID-aware cherry-pick and clean linear-stack rebase that preserve ChangeIDs while producing new ChangeVersion/Revision identities.
+- Added replay conflict detection that persists canonical Conflict evidence and refuses ref/workspace movement.
+- Added organization, membership, team, repository-role, visibility and least-privilege grant derivation using the unified capability vocabulary.
+- Added authenticated HTTP sync capability discovery, pinned plan negotiation, per-object transfer, durable resume cursors and publish-after-complete remote ref updates.
+- Kept public internet sync transport-independent from canonical repository identity and retained bundle transport as an independent recovery/bootstrap path.
+
 ## 0.10.0 - Recovery, Sparse/Lazy Workspaces and Resumable Synchronization
 
 - Added durable conflicted-merge state, explicit NodeID-preserving resolution, continuation, stale-head protection, and abort.

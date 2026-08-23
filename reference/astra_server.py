@@ -11,6 +11,8 @@ from astra_security import TokenStore,PolicyEngine,RefPolicy,AuthorizationError,
 from astra_platform import CollaborationStore
 from astra_merge import MergeEngine
 from astra_portable_bundle import create_portable_bundle,apply_portable_bundle
+from astra_resumable_sync import SyncCapabilities,build_sync_plan
+from astra_semantic_codec import encode_semantic
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -59,6 +61,16 @@ class AstraServer:
        with tempfile.NamedTemporaryFile(suffix='.astra') as f:
         create_portable_bundle(repo,f.name);raw=Path(f.name).read_bytes()
        self.send_response(200);self.send_header('Content-Type','application/vnd.astra.bundle');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+      if p[3:]==['sync','capabilities']:
+       c=SyncCapabilities();return self._json(200,{'protocol_version':c.protocol_version,'resumable':c.resumable,'path_filter':c.path_filter,'promised_content':c.promised_content})
+      if len(p)==7 and p[3:5]==['sync','object']:
+       kind,oid=p[5],p[6];validate_object_id(oid)
+       if kind=='content':raw=repo.get_content(oid)
+       else:
+        types={'tree':ObjectType.TREE,'change-version':ObjectType.CHANGE_VERSION,'revision':ObjectType.REVISION}
+        if kind not in types:raise ValueError('unsupported sync object kind')
+        raw=encode_semantic(repo.get(types[kind],oid)).encode()
+       self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['proposals']:return self._json(200,{'proposals':outer.platform.list_proposals(name)})
      if p==['v1','events']:
       self._require('events.read');q=parse_qs(urlparse(self.path).query);return self._json(200,{'events':outer.platform.events(int(q.get('after',['0'])[0]))})
@@ -79,6 +91,8 @@ class AstraServer:
        with tempfile.NamedTemporaryFile(suffix='.astra') as f:
         Path(f.name).write_bytes(raw);apply_portable_bundle(repo,f.name,publish_refs=False)
        outer.platform.emit('bundle.applied',name,principal.principal_id,{'bytes':len(raw)});return self._json(200,{'ok':True})
+      if p[3:]==['sync','plan']:
+       self._require('repo.read',name);prefixes=tuple(bytes.fromhex(x) for x in body.get('path_prefixes',[]));plan=build_sync_plan(repo,include_content=bool(body.get('include_content',True)),path_prefixes=prefixes);return self._json(200,plan.canonical_dict()|{'plan_hash':plan.plan_hash})
       if p[3:]==['refs']:
        ref=body['ref'].encode();cap=outer.policy.required_capability(ref);principal=self._require(cap,name);oid=body['revision'];validate_object_id(oid);repo.get(ObjectType.REVISION,oid)
        view=repo.current_view();refs=dict(view.refs);expected_old=body.get('expected_old')
