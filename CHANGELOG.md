@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 - Search, Multi-Repo Workspaces, Enterprise Identity and Packages
+
+- Added disposable UTF-8 code/content search and symbol indexes keyed by immutable Revision/Content identities.
+- Added authenticated hosted repository search API without making search indexes authoritative.
+- Added immutable multi-repository WorkspaceManifest objects that pin exact revisions and verify every repository/revision before publication.
+- Added immutable generic package/artifact registry with digest verification and capability-gated hosted publish/list/download endpoints.
+- Added OIDC ID-token signature/issuer/audience/expiry/nonce verification and durable SCIM-style user/group provisioning state.
+- Added a fail-closed SAML boundary that accepts only externally signature-validated assertions rather than implementing XMLDSIG internally.
+- Added executable ref-CAS model checks covering stale concurrent writers and refreshed retries.
+
 ## 0.11.0 - Change Replay, Organizations and Remote Resumable Sync
 
 - Added branch listing/create/switch/delete porcelain and amend with stable logical ChangeID semantics.

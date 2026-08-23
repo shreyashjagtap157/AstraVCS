@@ -13,6 +13,9 @@ from astra_merge import MergeEngine
 from astra_portable_bundle import create_portable_bundle,apply_portable_bundle
 from astra_resumable_sync import SyncCapabilities,build_sync_plan
 from astra_semantic_codec import encode_semantic
+from astra_search import SearchIndex
+from astra_workspace_manifest import WorkspaceEntry,WorkspaceManifest,WorkspaceManifestStore
+from astra_packages import PackageRegistry
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -26,7 +29,7 @@ class RepositoryRegistry:
 
 class AstraServer:
  def __init__(self,root,policies=None,registry=None,tokens=None,platform=None):
-  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
+  self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=WorkspaceManifestStore(self.root/'workspaces');self.packages=PackageRegistry(self.root/'packages');self._owns_tokens=tokens is None;self._owns_platform=platform is None;self.policy=PolicyEngine(policies or [RefPolicy()]);self.http=None;self.thread=None
  def serve(self,host='127.0.0.1',port=0):
   outer=self
   class Handler(BaseHTTPRequestHandler):
@@ -72,6 +75,18 @@ class AstraServer:
         raw=encode_semantic(repo.get(types[kind],oid)).encode()
        self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['proposals']:return self._json(200,{'proposals':outer.platform.list_proposals(name)})
+      if p[3:]==['search']:
+       q=parse_qs(urlparse(self.path).query);query=q.get('q',[''])[0];revision=q.get('revision',[None])[0];idx=SearchIndex(repo)
+       try:
+        if not idx.db.execute('SELECT 1 FROM paths LIMIT 1').fetchone():idx.rebuild()
+        hits=idx.search(query,revision=revision);return self._json(200,{'hits':[{'revision':h.revision,'path_hex':h.path.hex(),'content_id':h.content_id,'snippet':h.snippet} for h in hits]})
+       finally:idx.close()
+     if len(p)==4 and p[:2]==['v1','packages']:
+      ns,name=p[2],p[3];self._require('packages.read',ns+'/'+name);rows=outer.packages.list_versions(ns,name);return self._json(200,{'packages':[r.__dict__ for r in rows]})
+     if len(p)==6 and p[:2]==['v1','packages']:
+      ns,name,version,filename=p[2:6];self._require('packages.read',ns+'/'+name);meta,raw=outer.packages.get(ns,name,version,filename);self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('X-Astra-SHA256',meta.digest);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+     if len(p)==3 and p[:2]==['v1','workspaces']:
+      self._require('workspaces.read');m=outer.workspaces.get(p[2]);return self._json(200,m.canonical()|{'id':m.manifest_id})
      if p==['v1','events']:
       self._require('events.read');q=parse_qs(urlparse(self.path).query);return self._json(200,{'events':outer.platform.events(int(q.get('after',['0'])[0]))})
      return self._json(404,{'error':'not_found'})
@@ -79,9 +94,15 @@ class AstraServer:
     except Exception as e:return self._json(400,{'error':str(e)})
    def do_POST(self):
     try:
-     p=self._parts();body=None if (len(p)>=4 and p[:2]==['v1','repos'] and p[3:]==['bundle']) else self._body()
+     p=self._parts();is_binary=(len(p)>=4 and p[:2]==['v1','repos'] and p[3:]==['bundle']) or (len(p)==6 and p[:2]==['v1','packages']);body=None if is_binary else self._body()
      if p==['v1','repos']:
       principal=self._require('repos.create');name=body['name'];outer.registry.create(name);outer.platform.emit('repository.created',name,principal.principal_id,{});return self._json(201,{'name':name})
+     if len(p)==6 and p[:2]==['v1','packages']:
+      ns,name,version,filename=p[2:6];self._require('packages.write',ns+'/'+name);n=int(self.headers.get('Content-Length','0'))
+      if n<0 or n>512*1024*1024:raise ValueError('package body too large')
+      meta=outer.packages.publish(ns,name,version,filename,self.rfile.read(n));return self._json(201,meta.__dict__)
+     if p==['v1','workspaces']:
+      self._require('workspaces.write');entries=tuple(WorkspaceEntry(x['name'],x['repository'],x['revision'],x['mount']) for x in body['entries']);m=WorkspaceManifest(body['name'],entries);outer.workspaces.verify(m,outer.registry);oid=outer.workspaces.put(m);return self._json(201,{'id':oid})
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2];repo=outer.registry.open(name)
       if p[3:]==['bundle']:
@@ -122,3 +143,4 @@ class AstraServer:
   if self.http:self.http.shutdown();self.http.server_close();self.thread.join(timeout=5)
   if self._owns_tokens:self.tokens.close()
   if self._owns_platform:self.platform.close()
+  self.packages.close()
