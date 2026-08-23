@@ -1,3 +1,10 @@
+## 0.19.0 - Repository Soak and Durability Qualification
+
+- Added deterministic long-running repository soak tooling with configurable seeds/step counts.
+- Soak exercises commit, amend, branch creation/switch, detached checkout, executable-mode changes, per-transition fsck, and periodic portable-bundle restore.
+- Added a bounded soak regression test and release/overnight qualification guidance.
+- Verified a 150-step sample with 107 observed revisions and 15 refs while preserving fsck after every transition.
+
 ## 0.18.0 - Dual-Control Self-Hosting Qualification
 
 - Added `tools/self_host_check.py` to commit the exact Git `HEAD` source archive through AstraVCS and compare all tracked paths, blob bytes, symlinks, and executable modes against Git.

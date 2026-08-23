@@ -4,11 +4,11 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.18.0` — dual-control self-hosting and release-qualification milestone.
+`v0.19.0` — deterministic repository soak and durability qualification milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-`v0.18.0` retains the independent conformance/state-model gates and adds repeatable dual-control self-hosting qualification: the exact Git commit is exported without `.git`, committed through Astra, compared path/content/mode-for-mode with Git, then bundled/restored and fsck-verified. Git remains the independent recovery mirror.
+`v0.19.0` retains dual-control self-hosting and adds deterministic long-duration repository soak workloads covering commits, amends, branches, detached checkout, mode changes, per-transition fsck, and periodic bundle/restore verification. A short sample runs in CI while larger profiles are release/overnight gates.
 
 The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 
@@ -22,4 +22,4 @@ Repository meaning is stable; storage, indexes, transports, UI frameworks, AI mo
 
 ## Current implementation milestone
 
-`v0.18.0` retains semantic IDs as repository authority while keeping storage, indexes, chunking, transports, workspace materialization, and sync-session state replaceable. Sparse/lazy workspaces and resumable synchronization deliberately operate through the same canonical Repository/Content APIs rather than creating alternate history semantics.
+`v0.19.0` retains semantic IDs as repository authority while keeping storage, indexes, chunking, transports, workspace materialization, and sync-session state replaceable. Sparse/lazy workspaces and resumable synchronization deliberately operate through the same canonical Repository/Content APIs rather than creating alternate history semantics.
