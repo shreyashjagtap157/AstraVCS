@@ -1,3 +1,10 @@
+## 0.58.0.0 - Generation-fenced agent cancellation
+
+- Added durable cancellation for queued autonomous-agent jobs and generation-fenced cancellation for running jobs.
+- Prevented cancelled jobs and stale worker generations from later claiming or completing cancelled execution.
+- Added capability-gated HTTP cancellation with typed `agent.cancelled` events plus Python and TypeScript client support.
+- Added local SQLite and shared-SQL cross-node regression coverage for cancellation visibility and ownership fencing.
+
 ## 0.57.0.0 - Bounded agent execution deadlines
 
 - Persisted per-job `max_seconds` execution budgets across local SQLite and shared SQL control planes.

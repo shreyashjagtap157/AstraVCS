@@ -460,6 +460,16 @@ class SQLAgentJobStore:
   return jid
  def get(self,jid):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.jobs).where(self.cp.jobs.c.id==jid)).mappings().first();return None if r is None else dict(r)
+ def cancel(self,jid,*,worker_id=None,claim_generation=None,reason='cancelled'):
+  now=int(time.time());cond=and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='queued')
+  if worker_id is not None:
+   if claim_generation is None:raise AgentError('claim_generation required for worker-owned cancel')
+   cond=and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation,self.cp.jobs.c.lease_until>now,self.cp.jobs.c.deadline_at>now)
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(cond).values(status='cancelled',result=json.dumps({'reason':reason},sort_keys=True),updated=now,worker_id=None,lease_until=None))
+  if res.rowcount!=1:
+   if self.get(jid) is None:raise AgentError('job not found')
+   raise AgentError('agent job cannot be cancelled in its current ownership state')
+  return self.get(jid)
  def claim(self,jid,*,worker_id=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
   worker_id=worker_id or str(uuid.uuid4());now=int(time.time())

@@ -225,3 +225,24 @@ class AgentExecutionDeadlineTests(unittest.TestCase):
    try:
     with self.assertRaisesRegex(AgentError,'max_seconds'):s.create(AgentSpec('r','11'*32,'bad',('repo.read',),max_seconds=0))
    finally:s.close()
+
+class AgentCancellationTests(unittest.TestCase):
+ def test_queued_cancel_is_terminal_and_cannot_be_claimed(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   jobs=AgentJobStore(Path(td)/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r','11'*32,'cancel me',('repo.read',)))
+    row=jobs.cancel(jid,reason='obsolete');self.assertEqual(row['status'],'cancelled');self.assertEqual(json.loads(row['result'])['reason'],'obsolete')
+    with self.assertRaisesRegex(AgentError,'not queued or reclaimable'):jobs.claim(jid,worker_id='w')
+   finally:jobs.close()
+ def test_running_cancel_is_generation_fenced(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   jobs=AgentJobStore(Path(td)/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r','11'*32,'cancel me',('repo.read',)));row=jobs.claim(jid,worker_id='w',lease_seconds=30)
+    with self.assertRaisesRegex(AgentError,'ownership state'):jobs.cancel(jid,worker_id='w',claim_generation=row['claim_generation']+1)
+    self.assertEqual(jobs.cancel(jid,worker_id='w',claim_generation=row['claim_generation'])['status'],'cancelled')
+    with self.assertRaisesRegex(AgentError,'not owned'):jobs.finish(jid,'completed',{},worker_id='w',claim_generation=row['claim_generation'])
+   finally:jobs.close()

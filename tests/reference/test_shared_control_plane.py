@@ -122,3 +122,17 @@ class SharedAgentExecutionDeadlineTests(unittest.TestCase):
     with b.engine.begin() as c:c.execute(__import__('sqlalchemy').text('UPDATE cp_agent_jobs SET lease_until=:t, deadline_at=:t WHERE id=:id'),{'t':int(time.time())-1,'id':jid})
     with self.assertRaisesRegex(AgentError,'deadline expired'):a.agent_store.heartbeat(jid,'w',claim_generation=row['claim_generation'],lease_seconds=5)
    finally:a.close();b.close()
+
+class SharedAgentCancellationTests(unittest.TestCase):
+ def test_cross_node_cancel_visibility_and_fencing(self):
+  from astra_shared_control import SharedControlPlane
+  from astra_backend import FileBlobBackend
+  from astra_agents import AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str(Path(td)/'cp.db');a=SharedControlPlane(url,FileBlobBackend(Path(td)/'a-blobs'));b=SharedControlPlane(url,FileBlobBackend(Path(td)/'b-blobs'))
+   try:
+    jid=a.agent_store.create(AgentSpec('r','11'*32,'cancel',('repo.read',)));row=a.agent_store.claim(jid,worker_id='a',lease_seconds=30)
+    with self.assertRaisesRegex(AgentError,'ownership state'):b.agent_store.cancel(jid,worker_id='a',claim_generation=row['claim_generation']+1)
+    self.assertEqual(a.agent_store.cancel(jid,worker_id='a',claim_generation=row['claim_generation'],reason='stop')['status'],'cancelled')
+    self.assertEqual(b.agent_store.get(jid)['status'],'cancelled')
+   finally:a.close();b.close()

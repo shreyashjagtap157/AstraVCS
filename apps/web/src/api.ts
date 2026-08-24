@@ -56,6 +56,7 @@ export class AstraApi {
   setProposalDraft(repo:string,proposalId:string,draft:boolean):Promise<{proposal:Proposal}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/${draft?'draft':'ready'}`,{method:'POST',body:'{}'})}
   createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
+  cancelAgentJob(id:string,reason='cancelled by user'):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}/cancel`,{method:'POST',body:JSON.stringify({reason})})}
   revision(repo:string,oid:string):Promise<RevisionRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/revisions/${encodeURIComponent(oid)}`)}
   search(repo:string,query:string,revision?:string):Promise<{hits:SearchHit[]}>{const q=new URLSearchParams({q:query});if(revision)q.set('revision',revision);return this.request(`/v1/repos/${encodeURIComponent(repo)}/search?${q}`)}
   issues(repo:string,state='open'):Promise<{issues:Issue[]}>{const q=new URLSearchParams({state});return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues?${q}`)}

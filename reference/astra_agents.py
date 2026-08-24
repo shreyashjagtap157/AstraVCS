@@ -36,6 +36,19 @@ class AgentJobStore:
   jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation,max_seconds,deadline_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0,int(spec.max_seconds),None));self.db.commit();return jid
  def get(self,jid):
   r=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone();return None if r is None else dict(r)
+ def cancel(self,jid,*,worker_id=None,claim_generation=None,reason='cancelled'):
+  now=int(time.time());payload=json.dumps({'reason':reason},sort_keys=True)
+  if worker_id is None:
+   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=?',('cancelled',payload,now,jid,'queued'))
+  else:
+   if claim_generation is None:raise AgentError('claim_generation required for worker-owned cancel')
+   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>? AND deadline_at>?',('cancelled',payload,now,jid,'running',worker_id,claim_generation,now,now))
+  self.db.commit()
+  if cur.rowcount!=1:
+   row=self.get(jid)
+   if row is None:raise AgentError('job not found')
+   raise AgentError('agent job cannot be cancelled in its current ownership state')
+  return self.get(jid)
  def finish(self,jid,status,result,*,worker_id=None,claim_generation=None):
   if status not in ('completed','failed','no_change','needs_rebase'):raise AgentError('invalid terminal job status')
   now=int(time.time())

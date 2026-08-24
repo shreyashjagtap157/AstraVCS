@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.57.0.0`
+`v0.58.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.57.0.0` adds durable bounded execution deadlines to autonomous-agent jobs. The configured `max_seconds` budget is persisted in both local SQLite and shared SQL stores; each claim establishes a hard execution deadline, lease renewal is capped at that deadline, and worker-owned terminal completion is rejected after lease/deadline expiry. This closes the stale-completion window before another worker has reclaimed an expired job.
+`v0.58.0.0` adds durable bounded execution deadlines to autonomous-agent jobs. The configured `max_seconds` budget is persisted in both local SQLite and shared SQL stores; each claim establishes a hard execution deadline, lease renewal is capped at that deadline, and worker-owned terminal completion is rejected after lease/deadline expiry. This closes the stale-completion window before another worker has reclaimed an expired job.
 
 ## Validation available in this environment
 

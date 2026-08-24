@@ -234,6 +234,13 @@ class AstraServer:
       principal=self._require('orgs.write');outer.identity.add_team_member(p[2],body['principal']);outer.platform.emit('team.member.added',None,principal.principal_id,{'team_id':p[2],'member':body['principal']});return self._json(200,{'ok':True})
      if p==['v1','repos']:
       principal=self._require('repos.create');name=body['name'];outer.registry.create(name);outer.platform.emit('repository.created',name,principal.principal_id,{});return self._json(201,{'name':name})
+     if len(p)==4 and p[:2]==['v1','agents'] and p[3]=='cancel':
+      row=outer.agent_jobs.get(p[2])
+      if not row:return self._json(404,{'error':'agent_job_not_found'})
+      principal=self._require('agents.start',row['repo'])
+      cancelled=outer.agent_jobs.cancel(p[2],reason=body.get('reason','cancelled by user'))
+      outer.platform.emit('agent.cancelled',row['repo'],principal.principal_id,{'job_id':p[2],'reason':body.get('reason','cancelled by user')})
+      return self._json(200,{'job':cancelled})
      if len(p)==6 and p[:2]==['v1','packages']:
       ns,name,version,filename=p[2:6];self._require('packages.write',ns+'/'+name);n=int(self.headers.get('Content-Length','0'))
       if n<0 or n>512*1024*1024:raise ValueError('package body too large')

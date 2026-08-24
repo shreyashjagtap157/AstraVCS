@@ -41,6 +41,7 @@ export class AstraApi {
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
   createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
+  cancelAgentJob(id:string,reason='cancelled by user'):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}/cancel`,{method:'POST',body:JSON.stringify({reason})})}
 
   issues(repo:string,state='open',limit=100,after=0):Promise<{issues:Issue[];next_after:number|null}>{const q=new URLSearchParams({state,limit:String(limit),after:String(after)});return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues?${q}`)}
   createIssue(repo:string,title:string,body=''):Promise<{id:number}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues`,{method:'POST',body:JSON.stringify({title,body})})}

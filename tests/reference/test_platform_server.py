@@ -129,3 +129,18 @@ class SignedCatalogInstallTests(unittest.TestCase):
     self.assertEqual(req('/v1/plugin-catalog')['entries'][0]['plugin_id'],'catalog.demo')
     installed=req('/v1/plugin-catalog/install',{'plugin_id':'catalog.demo','version':'1.0.0','granted_capabilities':['repo.read']});self.assertEqual(installed['catalog_digest'],'44'*32);self.assertEqual(installed['plugin']['id'],'catalog.demo')
    finally:s.close()
+
+class AgentCancellationHTTPTests(unittest.TestCase):
+ def test_agent_cancel_requires_capability_and_emits_event(self):
+  with tempfile.TemporaryDirectory() as td:
+   s=AstraServer(td);admin=s.tokens.issue(Principal('admin','human'),[Grant('*','*')],None);host,port=s.serve();base=f'http://{host}:{port}'
+   def req(method,path,body=None,tok=admin):
+    data=None if body is None else json.dumps(body).encode();r=urllib.request.Request(base+path,data=data,method=method,headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'});return json.loads(urllib.request.urlopen(r).read())
+   try:
+    req('POST','/v1/repos',{'name':'r'});repo=s.registry.open('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('x');rev=w.commit(b'base')
+    jid=req('POST','/v1/repos/r/agents',{'input_revision':rev.revision_id,'task':'later'})['id']
+    read=s.tokens.issue(Principal('reader','human'),[Grant('agents.read','r')],None)
+    with self.assertRaises(urllib.error.HTTPError):req('POST',f'/v1/agents/{jid}/cancel',{},read)
+    row=req('POST',f'/v1/agents/{jid}/cancel',{'reason':'obsolete'})['job'];self.assertEqual(row['status'],'cancelled')
+    self.assertTrue(any(e['type']=='agent.cancelled' and json.loads(e['payload'])['job_id']==jid for e in s.platform.events()))
+   finally:s.close()
