@@ -10,7 +10,7 @@ class CollaborationStore:
   self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True);self.db=sqlite3.connect(self.path,check_same_thread=False);self.db.row_factory=sqlite3.Row
   self.db.executescript('''
   PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-  CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, repo TEXT,target_ref TEXT,target_revision TEXT,source_revision TEXT,status TEXT,created_by TEXT,created_at INTEGER);
+  CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, repo TEXT,target_ref TEXT,target_revision TEXT,source_revision TEXT,status TEXT,created_by TEXT,created_at INTEGER,draft INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS reviews(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,reviewer TEXT,state TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS checks(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,name TEXT,status TEXT,conclusion TEXT,details TEXT,updated_at INTEGER,UNIQUE(proposal_id,name));
   CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT,repo TEXT,actor TEXT,payload TEXT,created_at INTEGER);
@@ -20,6 +20,8 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(proposal_id,subject_kind,subject));
   ''')
+  proposal_cols={r['name'] for r in self.db.execute('PRAGMA table_info(proposals)')}
+  if 'draft' not in proposal_cols:self.db.execute('ALTER TABLE proposals ADD COLUMN draft INTEGER NOT NULL DEFAULT 0')
   review_cols={r['name'] for r in self.db.execute('PRAGMA table_info(reviews)')}
   if 'source_revision' not in review_cols:self.db.execute('ALTER TABLE reviews ADD COLUMN source_revision TEXT')
   check_cols={r['name'] for r in self.db.execute('PRAGMA table_info(checks)')}
@@ -30,12 +32,17 @@ class CollaborationStore:
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
   cur=self.db.execute('INSERT INTO events(type,repo,actor,payload,created_at) VALUES(?,?,?,?,?)',(event_type,repo,actor,json.dumps(payload,sort_keys=True,separators=(',',':')),int(time.time())));self.db.commit();return cur.lastrowid
- def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None):
-  pid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO proposals VALUES(?,?,?,?,?,?,?,?)',(pid,repo,target_ref,target_revision,source_revision,'open',actor,now));self.db.commit();self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision});return pid
+ def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None,draft=False):
+  pid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO proposals VALUES(?,?,?,?,?,?,?,?,?)',(pid,repo,target_ref,target_revision,source_revision,'open',actor,now,1 if draft else 0));self.db.commit();self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision,'draft':bool(draft)});return pid
  def get_proposal(self,pid):
   r=self.db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   return [dict(x) for x in self.db.execute('SELECT * FROM proposals WHERE repo=? AND status=? ORDER BY created_at,id',(repo,status))]
+ def set_proposal_draft(self,pid,actor,draft):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  if p['status']!='open':raise PlatformError('proposal is not open')
+  self.db.execute('UPDATE proposals SET draft=? WHERE id=?',(1 if draft else 0,pid));self.db.commit();self.emit('proposal.'+('drafted' if draft else 'ready'),p['repo'],actor,{'proposal_id':pid});return self.get_proposal(pid)
  def update_proposal_source(self,pid,source_revision,actor,expected_old=None):
   validate_object_id(source_revision,'RevisionID');p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')

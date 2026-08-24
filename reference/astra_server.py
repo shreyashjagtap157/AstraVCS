@@ -256,7 +256,11 @@ class AstraServer:
        else:raise ValueError('invalid ownership action')
        return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if p[3:]==['proposals']:
-       principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid);return self._json(201,{'id':pid,'target_revision':target_oid})
+       principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid,bool(body.get('draft',False)));return self._json(201,{'id':pid,'target_revision':target_oid,'draft':bool(body.get('draft',False))})
+      if len(p)==6 and p[3]=='proposals' and p[5] in ('draft','ready'):
+       principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       row=outer.platform.set_proposal_draft(p[4],principal.principal_id,p[5]=='draft');return self._json(200,{'proposal':row})
       if len(p)==6 and p[3]=='proposals' and p[5]=='refresh':
        principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -294,6 +298,7 @@ class AstraServer:
       if len(p)==6 and p[3]=='proposals' and p[5]=='merge':
        principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')
+       if proposal.get('draft'):raise ValueError('draft proposal cannot be merged')
        ref=proposal['target_ref'].encode();self._require(outer.policy.required_capability(ref),name);policy=outer.policy.policy_for(ref)
        if policy:outer.platform.require_policy(p[4],policy);self._require_code_owner_reviews(name,p[4],policy)
        view=repo.current_view();refs=dict(view.refs);current=refs.get(ref)

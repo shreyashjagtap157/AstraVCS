@@ -28,7 +28,7 @@ class SharedControlPlane:
   self.engine=create_engine(url,future=True,pool_pre_ping=True)
   self.blobs=blob_backend;self.meta=MetaData()
   self.tokens=Table('cp_tokens',self.meta,Column('hash',String(64),primary_key=True),Column('principal',String(256),nullable=False),Column('kind',String(64),nullable=False),Column('grants',Text,nullable=False),Column('expires',Integer),Column('revoked',Integer,nullable=False,default=0))
-  self.proposals=Table('cp_proposals',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('target_ref',Text),Column('target_revision',String(64)),Column('source_revision',String(64)),Column('status',String(32)),Column('created_by',String(256)),Column('created_at',Integer))
+  self.proposals=Table('cp_proposals',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('target_ref',Text),Column('target_revision',String(64)),Column('source_revision',String(64)),Column('status',String(32)),Column('created_by',String(256)),Column('created_at',Integer),Column('draft',Integer,nullable=False,default=0))
   self.reviews=Table('cp_reviews',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('reviewer',String(256)),Column('state',String(32)),Column('body',Text),Column('created_at',Integer),Column('source_revision',String(64)))
   self.checks=Table('cp_checks',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('name',String(256)),Column('status',String(32)),Column('conclusion',String(32)),Column('details',Text),Column('updated_at',Integer),Column('source_revision',String(64)),UniqueConstraint('proposal_id','name',name='uq_cp_check'))
   self.events_t=Table('cp_events',self.meta,Column('seq',Integer,primary_key=True,autoincrement=True),Column('type',String(128)),Column('repo',String(256)),Column('actor',String(256)),Column('payload',Text),Column('created_at',Integer))
@@ -49,9 +49,11 @@ class SharedControlPlane:
   self.path_owners=Table('cp_path_owners',self.meta,Column('repo',String(256),primary_key=True),Column('pattern',String(512),primary_key=True),Column('subject_kind',String(32),primary_key=True),Column('subject',String(256),primary_key=True),Column('priority',Integer,nullable=False,default=0))
   self.meta.create_all(self.engine)
   insp=inspect(self.engine)
+  proposal_cols={c['name'] for c in insp.get_columns('cp_proposals')}
   review_cols={c['name'] for c in insp.get_columns('cp_reviews')}
   check_cols={c['name'] for c in insp.get_columns('cp_checks')}
   with self.engine.begin() as c:
+   if 'draft' not in proposal_cols:c.execute(text('ALTER TABLE cp_proposals ADD COLUMN draft INTEGER NOT NULL DEFAULT 0'))
    if 'source_revision' not in review_cols:c.execute(text('ALTER TABLE cp_reviews ADD COLUMN source_revision VARCHAR(64)'))
    if 'source_revision' not in check_cols:c.execute(text('ALTER TABLE cp_checks ADD COLUMN source_revision VARCHAR(64)'))
    c.execute(text('UPDATE cp_reviews SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_reviews.proposal_id) WHERE source_revision IS NULL'))
@@ -191,14 +193,20 @@ class SQLCollaborationStore:
   with self.cp.engine.begin() as c:
    res=c.execute(insert(self.cp.events_t).values(type=event_type,repo=repo,actor=actor,payload=json.dumps(payload,sort_keys=True,separators=(',',':')),created_at=int(time.time())))
    return res.inserted_primary_key[0]
- def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None):
+ def open_proposal(self,repo,target_ref,source_revision,actor,target_revision=None,draft=False):
   pid=str(uuid.uuid4());now=int(time.time())
-  with self.cp.engine.begin() as c:c.execute(insert(self.cp.proposals).values(id=pid,repo=repo,target_ref=target_ref,target_revision=target_revision,source_revision=source_revision,status='open',created_by=actor,created_at=now))
-  self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision});return pid
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.proposals).values(id=pid,repo=repo,target_ref=target_ref,target_revision=target_revision,source_revision=source_revision,status='open',created_by=actor,created_at=now,draft=1 if draft else 0))
+  self.emit('proposal.opened',repo,actor,{'proposal_id':pid,'target_ref':target_ref,'target_revision':target_revision,'source_revision':source_revision,'draft':bool(draft)});return pid
  def get_proposal(self,pid):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.proposals).where(self.cp.proposals.c.id==pid)).mappings().first();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.proposals).where(and_(self.cp.proposals.c.repo==repo,self.cp.proposals.c.status==status)).order_by(self.cp.proposals.c.created_at,self.cp.proposals.c.id)).mappings()]
+ def set_proposal_draft(self,pid,actor,draft):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  if p['status']!='open':raise PlatformError('proposal is not open')
+  with self.cp.engine.begin() as c:c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(draft=1 if draft else 0))
+  self.emit('proposal.'+('drafted' if draft else 'ready'),p['repo'],actor,{'proposal_id':pid});return self.get_proposal(pid)
  def update_proposal_source(self,pid,source_revision,actor,expected_old=None):
   validate_object_id(source_revision,'RevisionID');p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')

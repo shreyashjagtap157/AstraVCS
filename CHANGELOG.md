@@ -1,3 +1,10 @@
+## 0.45.0 - Draft proposal lifecycle
+
+- Added durable draft/ready state for proposals in local SQLite and shared SQL collaboration stores with backward-compatible schema migration.
+- Added hosted draft/ready transitions and draft creation through the proposal API, plus typed web-client support.
+- Refused protected proposal merge while the proposal remains draft, without affecting immutable source/target Revision history.
+- Added local/shared/cross-node and end-to-end hosted merge regression coverage.
+
 ## 0.44.0 - Required code-owner review policy
 
 - Added the backward-compatible `require_code_owner_reviews` protected-ref policy flag.
