@@ -1,3 +1,10 @@
+## 0.30.0 - Portable Bundle Format 2
+
+- Introduced `astravcs-bundle-v2`, binding portable backup/transfer archives to Repository Format 1 instead of leaving repository compatibility implicit.
+- Added strict v2 manifest validation, sorted object inventory checks, duplicate ZIP entry rejection, missing-object detection, StoreKey verification, and fail-closed repository-format checks.
+- Kept legacy `astravcs-bundle-v1` archives readable while emitting v2 for all new bundles.
+- Added an implementation-independent bundle-v2 verifier and round-trip/corruption/backward-reader conformance tests.
+
 ## 0.29.0 - Format 1 independent conformance
 
 - Added an implementation-independent Repository Format 1 verifier that validates the exact format descriptor, semantic-map layout, physical loose-object StoreKeys, envelope framing, and operation-head syntax without importing AstraVCS implementation modules.
