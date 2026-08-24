@@ -26,3 +26,7 @@ Reading review threads requires proposal-read permission. Creating, commenting o
 ## HA behavior
 
 `SQLCollaborationStore` persists threads and comments in the shared control-plane database. Independent server nodes therefore observe the same thread/comment/resolution state. No node-local cache is authoritative.
+
+## Hosted anchor verification
+
+The hosted API additionally verifies that a new thread anchors to the proposal's current source Revision and that the raw path in that Revision's Tree carries the supplied NodeID. Syntactically valid but nonexistent or stale anchors fail closed before collaboration metadata is written.

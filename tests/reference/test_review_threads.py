@@ -5,6 +5,8 @@ from astra_platform import CollaborationStore,PlatformError
 from astra_shared_control import SharedControlPlane
 from astra_backend import FileBlobBackend
 from astra_server import AstraServer,RepositoryRegistry
+from astra_local import LocalWorkspace
+from astra_codec import ObjectType
 from astra_security import TokenStore,Principal,Grant
 
 REV='11'*32
@@ -44,16 +46,21 @@ class ReviewThreadTests(unittest.TestCase):
    finally:s.close()
  def test_http_routes_and_permissions(self):
   with tempfile.TemporaryDirectory() as td:
-   root=Path(td);registry=RepositoryRegistry(root/'repos');registry.create('r');tokens=TokenStore(root/'tok.db');platform=CollaborationStore(root/'p.db')
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');(repo.worktree/'a.py').write_text('x\n');rev=LocalWorkspace(repo).commit(b'base').revision_id;revision=repo.get(ObjectType.REVISION,rev);entry=repo.get(ObjectType.TREE,revision.tree_id).as_dict()[b'a.py'];tokens=TokenStore(root/'tok.db');platform=CollaborationStore(root/'p.db')
    srv=AstraServer(root/'srv',registry=registry,tokens=tokens,platform=platform)
    try:
     grants=[Grant('proposals.read','r'),Grant('reviews.write','r')];tok=tokens.issue(Principal('u','human'),grants,None);addr=srv.serve()
-    pid=platform.open_proposal('r','refs/heads/main',REV,'u',REV)
-    def req(path,body=None):
+    pid=platform.open_proposal('r','refs/heads/main',rev,'u',rev)
+    def req(path,body=None,expect_error=False):
      data=None if body is None else json.dumps(body).encode();q=urllib.request.Request(f'http://{addr[0]}:{addr[1]}{path}',data=data,headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'})
-     with urllib.request.urlopen(q) as r:return json.loads(r.read())
-    tid=req(f'/v1/repos/r/proposals/{pid}/threads',{'revision_id':REV,'node_id':NODE,'path_hex':b'a.py'.hex(),'body':'nit','line_start':1})['id']
+     try:
+      with urllib.request.urlopen(q) as r:return json.loads(r.read())
+     except urllib.error.HTTPError as e:
+      if not expect_error:raise
+      return json.loads(e.read())
+    tid=req(f'/v1/repos/r/proposals/{pid}/threads',{'revision_id':rev,'node_id':entry.node_id,'path_hex':b'a.py'.hex(),'body':'nit','line_start':1})['id']
     self.assertEqual(req(f'/v1/repos/r/proposals/{pid}/threads')['threads'][0]['id'],tid)
+    self.assertIn('anchor',req(f'/v1/repos/r/proposals/{pid}/threads',{'revision_id':rev,'node_id':'33'*16,'path_hex':b'a.py'.hex(),'body':'bad'},True)['error'])
     req(f'/v1/repos/r/review-threads/{tid}/comments',{'body':'reply'});req(f'/v1/repos/r/review-threads/{tid}/resolve',{});self.assertEqual(req(f'/v1/repos/r/review-threads/{tid}')['thread']['state'],'resolved')
    finally:srv.close();tokens.close();platform.close()
 

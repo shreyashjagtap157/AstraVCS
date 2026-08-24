@@ -227,7 +227,11 @@ class AstraServer:
       if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
        principal=self._require('reviews.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
-       tid=outer.platform.create_review_thread(p[4],body['revision_id'],body['node_id'],bytes.fromhex(body['path_hex']),principal.principal_id,body['body'],body.get('line_start'),body.get('line_end'));return self._json(201,{'id':tid})
+       revision_id=body['revision_id']
+       if revision_id!=proposal['source_revision']:raise ValueError('review thread must anchor to the proposal source revision')
+       path_bytes=bytes.fromhex(body['path_hex']);revision=repo.get(ObjectType.REVISION,revision_id);tree=repo.get(ObjectType.TREE,revision.tree_id);entry=tree.as_dict().get(path_bytes)
+       if entry is None or entry.node_id!=body['node_id']:raise ValueError('review thread anchor does not match revision tree')
+       tid=outer.platform.create_review_thread(p[4],revision_id,body['node_id'],path_bytes,principal.principal_id,body['body'],body.get('line_start'),body.get('line_end'));return self._json(201,{'id':tid})
       if len(p)==6 and p[3]=='review-threads' and p[5]=='comments':
        principal=self._require('reviews.write',name);thread=outer.platform.get_review_thread(p[4])
        if not thread:return self._json(404,{'error':'review_thread_not_found'})

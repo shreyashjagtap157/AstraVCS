@@ -1,3 +1,9 @@
+## 0.38.0 - Verified review anchors and review surface
+
+- Added hosted verification that inline review threads anchor to the proposal source Revision and the exact NodeID/path present in that Revision's Tree.
+- Added regression coverage that rejects mismatched or nonexistent review anchors before persistence.
+- Surfaced review-thread state through the shared browser/Tauri web surface while keeping all review semantics in the authenticated server API.
+
 ## 0.37.0 - Monotonic roles and inline review threads
 
 - Made repository role capabilities cumulative so promotion from read → triage → write → maintain never removes privileges.
