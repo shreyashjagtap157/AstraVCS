@@ -1,3 +1,10 @@
+## 0.54.0 - Recoverable HA merge queue leases
+
+- Added bounded processing leases to protected merge-queue claims so crashed hosting nodes cannot permanently strand a target queue.
+- Added worker ownership fencing, attempt accounting, and atomic expired-claim reclamation across local SQLite and shared SQL stores.
+- Added typed `merge_queue.reclaimed` lifecycle events while preserving deterministic oldest-entry ordering during recovery.
+- Added backward-compatible schema migration for existing queue databases and permanent cross-node recovery/ownership regression coverage.
+
 ## 0.53.0 - HA-safe merge queue claiming
 
 - Added atomic merge-queue head claiming so concurrent hosting nodes cannot process the same protected-ref queue entry simultaneously.

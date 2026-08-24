@@ -47,4 +47,15 @@ class MergeQueueTests(unittest.TestCase):
     self.assertEqual(sum(r is not None for r in results),1);self.assertEqual(a.merge_queue_entry(pid)['state'],'processing');self.assertIsNone(b.merge_queue_head('r','refs/heads/main'))
     winner='a' if results[0] is not None else 'b';a.release_merge_claim(pid,winner);self.assertEqual(b.merge_queue_entry(pid)['state'],'queued')
    finally:cp.close();other.close()
+ def test_expired_claim_is_reclaimed_cross_node_and_owner_fenced(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);cp=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs'));other=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs2'));a=cp.platform_store;b=other.platform_store
+   try:
+    pid=a.open_proposal('r','refs/heads/main','a'*64,'u','b'*64);a.enqueue_merge(pid,'u');first=a.claim_merge_head('r','refs/heads/main','u',worker_id='worker-a',lease_seconds=30);self.assertEqual(first['attempts'],1)
+    with cp.engine.begin() as c:c.execute(cp.merge_queue.update().where(cp.merge_queue.c.proposal_id==pid).values(lease_until=0))
+    reclaimed=b.claim_merge_head('r','refs/heads/main','u',worker_id='worker-b',lease_seconds=30);self.assertEqual(reclaimed['worker_id'],'worker-b');self.assertEqual(reclaimed['attempts'],2)
+    with self.assertRaisesRegex(Exception,'not owned'):a.release_merge_claim(pid,'u',worker_id='worker-a')
+    b.release_merge_claim(pid,'u',worker_id='worker-b');self.assertEqual(a.merge_queue_entry(pid)['state'],'queued')
+    events=[e['type'] for e in a.events()];self.assertIn('merge_queue.reclaimed',events)
+   finally:cp.close();other.close()
 if __name__=='__main__':unittest.main()

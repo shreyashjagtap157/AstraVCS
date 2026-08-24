@@ -38,7 +38,7 @@ class SharedControlPlane:
   self.review_threads=Table('cp_review_threads',self.meta,Column('id',String(64),primary_key=True),Column('proposal_id',String(64),nullable=False),Column('revision_id',String(64),nullable=False),Column('node_id',String(32),nullable=False),Column('path_hex',Text,nullable=False),Column('line_start',Integer),Column('line_end',Integer),Column('state',String(16),nullable=False),Column('author',String(256),nullable=False),Column('created_at',Integer,nullable=False),Column('resolved_by',String(256)),Column('resolved_at',Integer))
   self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
   self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
-  self.merge_queue=Table('cp_merge_queue',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256),nullable=False),Column('target_ref',Text,nullable=False),Column('proposal_id',String(64),nullable=False,unique=True),Column('source_revision',String(64),nullable=False),Column('state',String(16),nullable=False),Column('enqueued_by',String(256),nullable=False),Column('enqueued_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
+  self.merge_queue=Table('cp_merge_queue',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256),nullable=False),Column('target_ref',Text,nullable=False),Column('proposal_id',String(64),nullable=False,unique=True),Column('source_revision',String(64),nullable=False),Column('state',String(16),nullable=False),Column('enqueued_by',String(256),nullable=False),Column('enqueued_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
@@ -54,10 +54,14 @@ class SharedControlPlane:
   proposal_cols={c['name'] for c in insp.get_columns('cp_proposals')}
   review_cols={c['name'] for c in insp.get_columns('cp_reviews')}
   check_cols={c['name'] for c in insp.get_columns('cp_checks')}
+  queue_cols={c['name'] for c in insp.get_columns('cp_merge_queue')}
   with self.engine.begin() as c:
    if 'draft' not in proposal_cols:c.execute(text('ALTER TABLE cp_proposals ADD COLUMN draft INTEGER NOT NULL DEFAULT 0'))
    if 'source_revision' not in review_cols:c.execute(text('ALTER TABLE cp_reviews ADD COLUMN source_revision VARCHAR(64)'))
    if 'source_revision' not in check_cols:c.execute(text('ALTER TABLE cp_checks ADD COLUMN source_revision VARCHAR(64)'))
+   if 'worker_id' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN worker_id VARCHAR(256)'))
+   if 'lease_until' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN lease_until INTEGER'))
+   if 'attempts' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'))
    c.execute(text('UPDATE cp_reviews SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_reviews.proposal_id) WHERE source_revision IS NULL'))
    c.execute(text('UPDATE cp_checks SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_checks.proposal_id) WHERE source_revision IS NULL'))
    legacy=[dict(x) for x in c.execute(select(self.checks).where(self.checks.c.source_revision!=None)).mappings()]
@@ -371,23 +375,27 @@ class SQLCollaborationStore:
   if state not in ('cancelled','stale','merged'):raise PlatformError('invalid merge queue terminal state')
   row=self.merge_queue_entry(pid)
   if not row or row['state'] not in ('queued','processing'):raise PlatformError('proposal is not queued or processing')
-  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state.in_(('queued','processing')))).values(state=state,updated_at=int(time.time())))
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state.in_(('queued','processing')))).values(state=state,worker_id=None,lease_until=None,updated_at=int(time.time())))
   if r.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
   self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
  def merge_queue_head(self,repo,target_ref):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.target_ref==target_ref,self.cp.merge_queue.c.state=='queued')).order_by(self.cp.merge_queue.c.id).limit(1)).mappings().first();return None if r is None else dict(r)
- def claim_merge_head(self,repo,target_ref,actor):
-  row=self.merge_queue_head(repo,target_ref)
-  if not row:return None
-  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.id==row['id'],self.cp.merge_queue.c.state=='queued')).values(state='processing',updated_at=int(time.time())))
+ def claim_merge_head(self,repo,target_ref,actor,worker_id=None,lease_seconds=60):
+  if lease_seconds<1 or lease_seconds>3600:raise PlatformError('merge queue lease must be between 1 and 3600 seconds')
+  now=int(time.time());worker_id=worker_id or actor;reclaimable=or_(self.cp.merge_queue.c.state=='queued',and_(self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.lease_until!=None,self.cp.merge_queue.c.lease_until<=now));cond=and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.target_ref==target_ref,reclaimable)
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(cond).order_by(self.cp.merge_queue.c.id).limit(1)).mappings().first()
+  if not r:return None
+  row=dict(r);reclaimable=or_(self.cp.merge_queue.c.state=='queued',and_(self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.lease_until!=None,self.cp.merge_queue.c.lease_until<=now))
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.id==row['id'],reclaimable)).values(state='processing',worker_id=worker_id,lease_until=now+lease_seconds,attempts=self.cp.merge_queue.c.attempts+1,updated_at=now))
   if r.rowcount!=1:return None
-  self.emit('merge_queue.processing',repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref});return self.merge_queue_entry(row['proposal_id'])
- def release_merge_claim(self,pid,actor):
+  event='merge_queue.reclaimed' if row['state']=='processing' else 'merge_queue.processing';self.emit(event,repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref,'worker_id':worker_id,'lease_until':now+lease_seconds});return self.merge_queue_entry(row['proposal_id'])
+ def release_merge_claim(self,pid,actor,worker_id=None):
   row=self.merge_queue_entry(pid)
   if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
-  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing')).values(state='queued',updated_at=int(time.time())))
-  if r.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
-  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
+  worker_id=worker_id or actor
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.worker_id==worker_id)).values(state='queued',worker_id=None,lease_until=None,updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker')
+  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id});return self.merge_queue_entry(pid)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')

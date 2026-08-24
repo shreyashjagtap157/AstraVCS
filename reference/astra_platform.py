@@ -20,7 +20,7 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(proposal_id,subject_kind,subject));
-  CREATE TABLE IF NOT EXISTS merge_queue(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT NOT NULL,target_ref TEXT NOT NULL,proposal_id TEXT NOT NULL UNIQUE,source_revision TEXT NOT NULL,state TEXT NOT NULL,enqueued_by TEXT NOT NULL,enqueued_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS merge_queue(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT NOT NULL,target_ref TEXT NOT NULL,proposal_id TEXT NOT NULL UNIQUE,source_revision TEXT NOT NULL,state TEXT NOT NULL,enqueued_by TEXT NOT NULL,enqueued_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,worker_id TEXT,lease_until INTEGER,attempts INTEGER NOT NULL DEFAULT 0);
   CREATE INDEX IF NOT EXISTS merge_queue_order ON merge_queue(repo,target_ref,state,id);
   ''')
   proposal_cols={r['name'] for r in self.db.execute('PRAGMA table_info(proposals)')}
@@ -31,6 +31,10 @@ class CollaborationStore:
   if 'source_revision' not in check_cols:self.db.execute('ALTER TABLE checks ADD COLUMN source_revision TEXT')
   self.db.execute('UPDATE reviews SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=reviews.proposal_id) WHERE source_revision IS NULL')
   self.db.execute('UPDATE checks SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=checks.proposal_id) WHERE source_revision IS NULL')
+  queue_cols={r['name'] for r in self.db.execute('PRAGMA table_info(merge_queue)')}
+  if 'worker_id' not in queue_cols:self.db.execute('ALTER TABLE merge_queue ADD COLUMN worker_id TEXT')
+  if 'lease_until' not in queue_cols:self.db.execute('ALTER TABLE merge_queue ADD COLUMN lease_until INTEGER')
+  if 'attempts' not in queue_cols:self.db.execute('ALTER TABLE merge_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
   self.db.execute('INSERT OR IGNORE INTO check_evidence(proposal_id,name,status,conclusion,details,updated_at,source_revision) SELECT proposal_id,name,status,conclusion,details,updated_at,source_revision FROM checks WHERE source_revision IS NOT NULL')
   self.db.commit()
  def close(self): self.db.close()
@@ -185,23 +189,25 @@ class CollaborationStore:
   if state not in ('cancelled','stale','merged'):raise PlatformError('invalid merge queue terminal state')
   row=self.merge_queue_entry(pid)
   if not row or row['state'] not in ('queued','processing'):raise PlatformError('proposal is not queued or processing')
-  updated=self.db.execute("UPDATE merge_queue SET state=?,updated_at=? WHERE proposal_id=? AND state IN ('queued','processing')",(state,int(time.time()),pid));self.db.commit()
+  updated=self.db.execute("UPDATE merge_queue SET state=?,worker_id=NULL,lease_until=NULL,updated_at=? WHERE proposal_id=? AND state IN ('queued','processing')",(state,int(time.time()),pid));self.db.commit()
   if updated.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
   self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
  def merge_queue_head(self,repo,target_ref):
   r=self.db.execute("SELECT * FROM merge_queue WHERE repo=? AND target_ref=? AND state='queued' ORDER BY id LIMIT 1",(repo,target_ref)).fetchone();return None if r is None else dict(r)
- def claim_merge_head(self,repo,target_ref,actor):
-  row=self.merge_queue_head(repo,target_ref)
+ def claim_merge_head(self,repo,target_ref,actor,worker_id=None,lease_seconds=60):
+  if lease_seconds<1 or lease_seconds>3600:raise PlatformError('merge queue lease must be between 1 and 3600 seconds')
+  now=int(time.time());worker_id=worker_id or actor
+  row=self.db.execute("SELECT * FROM merge_queue WHERE repo=? AND target_ref=? AND (state='queued' OR (state='processing' AND lease_until IS NOT NULL AND lease_until<=?)) ORDER BY id LIMIT 1",(repo,target_ref,now)).fetchone()
   if not row:return None
-  updated=self.db.execute("UPDATE merge_queue SET state='processing',updated_at=? WHERE id=? AND state='queued'",(int(time.time()),row['id']));self.db.commit()
+  row=dict(row);updated=self.db.execute("UPDATE merge_queue SET state='processing',worker_id=?,lease_until=?,attempts=attempts+1,updated_at=? WHERE id=? AND (state='queued' OR (state='processing' AND lease_until IS NOT NULL AND lease_until<=?))",(worker_id,now+lease_seconds,now,row['id'],now));self.db.commit()
   if updated.rowcount!=1:return None
-  self.emit('merge_queue.processing',repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref});return self.merge_queue_entry(row['proposal_id'])
- def release_merge_claim(self,pid,actor):
+  event='merge_queue.reclaimed' if row['state']=='processing' else 'merge_queue.processing';self.emit(event,repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref,'worker_id':worker_id,'lease_until':now+lease_seconds});return self.merge_queue_entry(row['proposal_id'])
+ def release_merge_claim(self,pid,actor,worker_id=None):
   row=self.merge_queue_entry(pid)
   if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
-  updated=self.db.execute("UPDATE merge_queue SET state='queued',updated_at=? WHERE proposal_id=? AND state='processing'",(int(time.time()),pid));self.db.commit()
-  if updated.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
-  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
+  worker_id=worker_id or actor;updated=self.db.execute("UPDATE merge_queue SET state='queued',worker_id=NULL,lease_until=NULL,updated_at=? WHERE proposal_id=? AND state='processing' AND worker_id=?",(int(time.time()),pid,worker_id));self.db.commit()
+  if updated.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker')
+  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id});return self.merge_queue_entry(pid)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')
