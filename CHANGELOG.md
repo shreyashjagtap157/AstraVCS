@@ -1,3 +1,9 @@
+## 0.35.0 - Signed immutable Release Sets
+
+- Added deterministic Release Set manifests binding version, bootstrap Git commit, Repository Format, compatibility descriptor, and artifact role/name/size/SHA-256.
+- Added operator-key Ed25519 signing and verification with fail-closed handling for tampering, wrong keys, missing/extra files, unsafe/duplicate names, and version/compatibility mismatches.
+- Added `tools/release_set.py` build/verify CLI and end-to-end tests using generated test keys; production release keys remain explicitly operator-managed.
+
 ## 0.34.0 - Semantic Bundle Format 2
 
 - Introduced `astravcs-semantic-bundle-v2` for backend-neutral hosted/agent/self-host transfer, binding it to Repository Format 1 and the supported semantic-schema set.

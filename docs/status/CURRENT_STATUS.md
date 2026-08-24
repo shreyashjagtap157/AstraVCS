@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.34.0`
+`v0.35.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.34.0` introduces Repository Format 1. New repositories use the stable Format 1 layout/state descriptor; legacy bootstrap repositories remain readable and migrate only after full object and published-history validation. Semantic IDs and existing repository history are preserved byte-for-byte. Generalized N-tip operation reconciliation, durable policies/plugins, and the prior hosted/client/assurance capabilities remain integrated.
+`v0.35.0` introduces Repository Format 1. New repositories use the stable Format 1 layout/state descriptor; legacy bootstrap repositories remain readable and migrate only after full object and published-history validation. Semantic IDs and existing repository history are preserved byte-for-byte. Generalized N-tip operation reconciliation, durable policies/plugins, and the prior hosted/client/assurance capabilities remain integrated.
 
 ## Validation available in this environment
 
