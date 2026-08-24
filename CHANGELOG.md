@@ -1,3 +1,10 @@
+## 0.49.0 - Atomic proposal source refresh
+
+- Fixed proposal-source compare-and-swap so the expected previous RevisionID is enforced by the database update itself rather than by a race-prone read-then-write sequence.
+- Made shared SQL/HA proposal refresh admit exactly one winner when nodes concurrently refresh from the same expected source revision; losing writers fail closed without emitting a false source-update event.
+- Kept reviewer re-request transitions in the same transaction as the successful source update.
+- Added a permanent cross-node concurrency regression proving single-winner CAS, final-source consistency, and one emitted `proposal.source.updated` event.
+
 ## 0.48.0 - Ancestor-safe merge preview
 
 - Made merge preview explicitly handle fast-forward and already-contained ancestor relationships before entering the divergent three-way merge engine.

@@ -78,4 +78,21 @@ class ProposalRefreshTests(unittest.TestCase):
     s.resolve_review_thread(tid,'reviewer');self.assertTrue(s.require_policy(pid,RefPolicy(require_resolved_threads=True)))
    finally:cp.close()
 
+ def test_shared_concurrent_source_cas_has_single_winner(self):
+  import threading
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str((Path(td)/'cp.db').resolve());a=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'));b=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'))
+   try:
+    pid=a.platform_store.open_proposal('r','refs/heads/main',R1,'author',R1);barrier=threading.Barrier(2);results=[];lock=threading.Lock()
+    def refresh(store,new_source):
+     barrier.wait()
+     try:store.update_proposal_source(pid,new_source,'author',R1);out=('ok',new_source)
+     except PlatformError as exc:out=('error',str(exc))
+     with lock:results.append(out)
+    t1=threading.Thread(target=refresh,args=(a.platform_store,R2));t2=threading.Thread(target=refresh,args=(b.platform_store,'44'*32));t1.start();t2.start();t1.join();t2.join()
+    self.assertEqual(sum(1 for x in results if x[0]=='ok'),1);self.assertEqual(sum(1 for x in results if x[0]=='error'),1);self.assertEqual(results[0][0]=='ok' or results[1][0]=='ok',True)
+    winner=next(x[1] for x in results if x[0]=='ok');self.assertEqual(a.platform_store.get_proposal(pid)['source_revision'],winner)
+    updates=[e for e in a.platform_store.events() if e['type']=='proposal.source.updated'];self.assertEqual(len(updates),1)
+   finally:a.close();b.close()
+
 if __name__=='__main__':unittest.main()

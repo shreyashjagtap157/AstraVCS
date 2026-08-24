@@ -48,7 +48,12 @@ class CollaborationStore:
   if not p:raise PlatformError('proposal not found')
   if p['status']!='open':raise PlatformError('proposal is not open')
   if expected_old is not None and p['source_revision']!=expected_old:raise PlatformError('proposal source advanced')
-  now=int(time.time());self.db.execute('UPDATE proposals SET source_revision=? WHERE id=?',(source_revision,pid));cur=self.db.execute("UPDATE proposal_reviewers SET state='requested',updated_at=? WHERE proposal_id=? AND state='fulfilled'",(now,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':cur.rowcount});return self.get_proposal(pid)
+  now=int(time.time())
+  if expected_old is None:updated=self.db.execute('UPDATE proposals SET source_revision=? WHERE id=? AND status=?',(source_revision,pid,'open'))
+  else:updated=self.db.execute('UPDATE proposals SET source_revision=? WHERE id=? AND status=? AND source_revision=?',(source_revision,pid,'open',expected_old))
+  if updated.rowcount!=1:
+   self.db.rollback();raise PlatformError('proposal source advanced')
+  cur=self.db.execute("UPDATE proposal_reviewers SET state='requested',updated_at=? WHERE proposal_id=? AND state='fulfilled'",(now,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':cur.rowcount});return self.get_proposal(pid)
  def request_reviewers(self,pid,actor,principals=(),teams=()):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')

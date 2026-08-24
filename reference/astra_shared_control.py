@@ -214,7 +214,11 @@ class SQLCollaborationStore:
   if expected_old is not None and p['source_revision']!=expected_old:raise PlatformError('proposal source advanced')
   now=int(time.time())
   with self.cp.engine.begin() as c:
-   c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(source_revision=source_revision));res=c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.state=='fulfilled')).values(state='requested',updated_at=now))
+   cond=and_(self.cp.proposals.c.id==pid,self.cp.proposals.c.status=='open')
+   if expected_old is not None:cond=and_(cond,self.cp.proposals.c.source_revision==expected_old)
+   updated=c.execute(update(self.cp.proposals).where(cond).values(source_revision=source_revision))
+   if updated.rowcount!=1:raise PlatformError('proposal source advanced')
+   res=c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.state=='fulfilled')).values(state='requested',updated_at=now))
   self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':res.rowcount});return self.get_proposal(pid)
  def request_reviewers(self,pid,actor,principals=(),teams=()):
   p=self.get_proposal(pid)

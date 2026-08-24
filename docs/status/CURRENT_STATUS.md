@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.36.0`
+`v0.49.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.36.0` introduces Repository Format 1. New repositories use the stable Format 1 layout/state descriptor; legacy bootstrap repositories remain readable and migrate only after full object and published-history validation. Semantic IDs and existing repository history are preserved byte-for-byte. Generalized N-tip operation reconciliation, durable policies/plugins, and the prior hosted/client/assurance capabilities remain integrated.
+`v0.49.0` hardens proposal revision evolution after the Repository Format 1 and self-hosting milestones. Proposal source refresh now enforces expected-source compare-and-swap in the database transaction itself across local and shared SQL stores. Revision-scoped reviews/checks, inline review threads, requested/code-owner review policy, draft lifecycle, deterministic review decisions, and structured mergeability remain integrated; concurrent HA refreshes from the same expected source admit one winner and stale writers fail closed.
 
 ## Validation available in this environment
 
