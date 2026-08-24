@@ -2,7 +2,7 @@
 
 AstraVCS uses the canonical four-part product version:
 
-`stable release.major update.minor update.patch`
+`stable release.major update.minor update.patches`
 
 For example, `0.55.0.0` means pre-stable release family 0, major implementation 55, minor update 0, patch 0.
 

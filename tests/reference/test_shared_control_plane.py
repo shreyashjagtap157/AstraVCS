@@ -36,6 +36,23 @@ class SharedControlPlaneTests(unittest.TestCase):
 
 if __name__=='__main__':unittest.main()
 
+
+class SharedAgentGenerationFenceTests(unittest.TestCase):
+ def test_reclaimed_same_worker_identity_is_generation_fenced(self):
+  from astra_backend import FileBlobBackend
+  import time
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);url='sqlite:///'+str(root/'cp.db');a=SharedControlPlane(url,FileBlobBackend(root/'blobs'));b=SharedControlPlane(url,FileBlobBackend(root/'blobs'))
+   try:
+    jid=a.agent_store.create(AgentSpec('r','11'*32,'task',('repo.read',)))
+    first=a.agent_store.claim(jid,worker_id='worker',lease_seconds=1);g1=first['claim_generation']
+    with a.engine.begin() as c:c.execute(__import__('sqlalchemy').text('UPDATE cp_agent_jobs SET lease_until=:t WHERE id=:id'),{'t':int(time.time())-1,'id':jid})
+    second=b.agent_store.claim(jid,worker_id='worker',lease_seconds=30);g2=second['claim_generation'];self.assertGreater(g2,g1)
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):a.agent_store.heartbeat(jid,'worker',claim_generation=g1,lease_seconds=30)
+    with self.assertRaisesRegex(AgentError,'not owned'):a.agent_store.finish(jid,'completed',{'stale':True},worker_id='worker',claim_generation=g1)
+    self.assertEqual(b.agent_store.finish(jid,'completed',{'fresh':True},worker_id='worker',claim_generation=g2)['status'],'completed')
+   finally:a.close();b.close()
+
 class SQLAlchemyHostedRuntimeTests(unittest.TestCase):
  def test_sqlalchemy_repository_cas_allows_one_same_base_winner(self):
   from astra_backend import SQLAlchemyMetadataBackend,HostedRepositoryRegistry,FileBlobBackend

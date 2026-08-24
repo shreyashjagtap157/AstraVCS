@@ -1,3 +1,10 @@
+## 0.56.0.0 - Generation-fenced HA agent execution
+
+- Added monotonically increasing claim generations to durable local and shared-SQL agent jobs.
+- Fenced agent heartbeat, intermediate-result persistence, and terminal completion by both worker identity and claim generation.
+- Prevented a stale execution from mutating a reclaimed job even when the replacement worker intentionally reuses the same worker identity.
+- Added backward-compatible local/shared schema evolution plus permanent local and cross-node regression coverage.
+
 ## 0.55.0.0 - Generation-fenced merge queue and four-part product versioning
 
 - Adopted canonical four-part product versions as `stable.major.minor.patch`; package ecosystems that require SemVer use the deterministic adapter `<stable>.<major>.<minor>-astra.<patch>`.

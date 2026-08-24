@@ -26,22 +26,23 @@ class AgentJobStore:
  def __init__(self,path):
   self.db=sqlite3.connect(Path(path),check_same_thread=False,timeout=30);self.db.row_factory=sqlite3.Row;self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA busy_timeout=30000');self.db.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,repo TEXT,input_revision TEXT,task TEXT,capabilities TEXT,network_policy TEXT,status TEXT,result TEXT,created INTEGER,updated INTEGER)')
   cols={r[1] for r in self.db.execute('PRAGMA table_info(jobs)')}
-  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0')):
+  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0'),('claim_generation','INTEGER NOT NULL DEFAULT 0')):
    if name not in cols:self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {decl}')
   self.db.commit()
  def close(self):self.db.close()
  def create(self,spec):
   if spec.network_policy not in ('deny','allowlist','unrestricted'):raise AgentError('invalid network policy')
-  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0));self.db.commit();return jid
+  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0));self.db.commit();return jid
  def get(self,jid):
   r=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone();return None if r is None else dict(r)
- def finish(self,jid,status,result,*,worker_id=None):
+ def finish(self,jid,status,result,*,worker_id=None,claim_generation=None):
   if status not in ('completed','failed','no_change','needs_rebase'):raise AgentError('invalid terminal job status')
   now=int(time.time())
   if worker_id is None:
    cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND (status!=? OR worker_id IS NULL)',(status,json.dumps(result,sort_keys=True),now,jid,'running'))
   else:
-   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=? AND worker_id=?',(status,json.dumps(result,sort_keys=True),now,jid,'running',worker_id))
+   if claim_generation is None:raise AgentError('claim_generation required for worker-owned finish')
+   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=? AND worker_id=? AND claim_generation=?',(status,json.dumps(result,sort_keys=True),now,jid,'running',worker_id,claim_generation))
   self.db.commit()
   if cur.rowcount!=1:
    if self.get(jid) is None:raise AgentError('job not found')
@@ -56,16 +57,17 @@ class AgentJobStore:
    if row is None:raise AgentError('job not found')
    reclaim=row['status']=='running' and row['lease_until'] is not None and int(row['lease_until'])<=now
    if row['status']!='queued' and not reclaim:raise AgentError('agent job is not queued or reclaimable')
-   cur=self.db.execute('UPDATE jobs SET status=?,worker_id=?,lease_until=?,attempts=attempts+1,updated=? WHERE id=? AND (status=? OR (status=? AND lease_until IS NOT NULL AND lease_until<=?))',('running',worker_id,until,now,jid,'queued','running',now))
+   cur=self.db.execute('UPDATE jobs SET status=?,worker_id=?,lease_until=?,attempts=attempts+1,claim_generation=claim_generation+1,updated=? WHERE id=? AND (status=? OR (status=? AND lease_until IS NOT NULL AND lease_until<=?))',('running',worker_id,until,now,jid,'queued','running',now))
    if cur.rowcount!=1:raise AgentError('agent job claim raced with another worker')
    self.db.commit()
   except Exception:
    if self.db.in_transaction:self.db.rollback()
    raise
-  out=self.get(jid);out['_claim_worker_id']=worker_id;return out
- def heartbeat(self,jid,worker_id,*,lease_seconds=60):
+  out=self.get(jid);out['_claim_worker_id']=worker_id;out['_claim_generation']=out['claim_generation'];return out
+ def heartbeat(self,jid,worker_id,*,claim_generation=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
-  now=int(time.time());cur=self.db.execute('UPDATE jobs SET lease_until=?,updated=? WHERE id=? AND status=? AND worker_id=? AND lease_until>?',(now+int(lease_seconds),now,jid,'running',worker_id,now));self.db.commit()
+  if claim_generation is None:raise AgentError('claim_generation required for heartbeat')
+  now=int(time.time());cur=self.db.execute('UPDATE jobs SET lease_until=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>?',(now+int(lease_seconds),now,jid,'running',worker_id,claim_generation,now));self.db.commit()
   if cur.rowcount!=1:
    if self.get(jid) is None:raise AgentError('job not found')
    raise AgentError('agent job lease is expired or not owned by this worker')
@@ -74,13 +76,13 @@ class AgentJobStore:
   row=self.get(jid)
   if not row:raise AgentError('job not found')
   if production and runtime.isolation_level.startswith('development'):raise AgentError('development agent runtime cannot satisfy production isolation')
-  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'])
+  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');claim_generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'])
   try:result=runtime.execute(spec,workspace)
-  except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim_worker)
-  if finalize:return self.finish(jid,'completed',result,worker_id=claim_worker)
-  now=int(time.time());cur=self.db.execute('UPDATE jobs SET result=?,updated=? WHERE id=? AND status=? AND worker_id=?',(json.dumps(result,sort_keys=True),now,jid,'running',claim_worker));self.db.commit()
+  except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim_worker,claim_generation=claim_generation)
+  if finalize:return self.finish(jid,'completed',result,worker_id=claim_worker,claim_generation=claim_generation)
+  now=int(time.time());cur=self.db.execute('UPDATE jobs SET result=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=?',(json.dumps(result,sort_keys=True),now,jid,'running',claim_worker,claim_generation));self.db.commit()
   if cur.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
-  out=self.get(jid);out['_claim_worker_id']=claim_worker;return out
+  out=self.get(jid);out['_claim_worker_id']=claim_worker;out['_claim_generation']=claim_generation;return out
 
 class MicroVMRuntime(AgentRuntime):
  isolation_level='microvm'
@@ -112,14 +114,14 @@ class AgentCoordinator:
    # Runtime executes only inside the ephemeral worktree. Production isolation
    # is delegated to the injected runtime contract.
    result=self.jobs.run(jid,runtime,Path(td),production=production,finalize=False,worker_id=worker_id)
-   claim_worker=result.pop('_claim_worker_id')
    if result['status']=='failed':return result
+   claim_worker=result.pop('_claim_worker_id');claim_generation=result.pop('_claim_generation')
    if not ws.status():
-    return self.jobs.finish(jid,'no_change',{'reason':'agent completed without producing a repository change'},worker_id=claim_worker)
+    return self.jobs.finish(jid,'no_change',{'reason':'agent completed without producing a repository change'},worker_id=claim_worker,claim_generation=claim_generation)
    commit=ws.commit(('Agent: '+row['task']).encode())
    create_portable_bundle(agent,bundle.name);apply_portable_bundle(source,bundle.name,publish_refs=False)
    current=dict(source.current_view().refs).get(target_ref.encode())
    if current!=input_revision:
-    return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced since agent input revision; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker)
+    return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced since agent input revision; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker,claim_generation=claim_generation)
    pid=self.platform.open_proposal(row['repo'],target_ref,commit.revision_id,'agent:'+jid,current)
-   payload=json.loads(result.get('result') or '{}');payload.update({'revision':commit.revision_id,'proposal_id':pid});return self.jobs.finish(jid,'completed',payload,worker_id=claim_worker)
+   payload=json.loads(result.get('result') or '{}');payload.update({'revision':commit.revision_id,'proposal_id':pid});return self.jobs.finish(jid,'completed',payload,worker_id=claim_worker,claim_generation=claim_generation)

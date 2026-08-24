@@ -56,6 +56,18 @@ class DaemonMCPTests(unittest.TestCase):
    repo=AstraRepository.init(td);w=LocalWorkspace(repo);(Path(td)/'x').write_text('x');c=w.commit(b'c');m=AstraMCP(repo);tools=m.handle({'jsonrpc':'2.0','id':1,'method':'tools/list'})['result']['tools'];self.assertTrue(tools);r=m.handle({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'get_revision','arguments':{'revision_id':c.revision_id}}});self.assertEqual(r['result']['revision_id'],c.revision_id)
 
 class AgentCoordinatorTests(unittest.TestCase):
+ def test_agent_runtime_failure_is_terminal_without_coordinator_crash(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'fail',('changes.create','proposals.create')))
+    def fail(spec,workspace):raise RuntimeError('boom')
+    row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(fail));self.assertEqual(row['status'],'failed');self.assertIn('boom',row['result'])
+   finally:jobs.close();platform.close()
  def test_agent_work_is_committed_and_proposed_not_pushed_to_main(self):
   from astra_server import RepositoryRegistry
   from astra_platform import CollaborationStore
@@ -108,7 +120,7 @@ class AgentLeaseFailoverTests(unittest.TestCase):
    try:
     jid=a.create(AgentSpec('r','11'*32,'t',('repo.read',)))
     row=a.claim(jid,worker_id='worker-a',lease_seconds=30);self.assertEqual(row['worker_id'],'worker-a');self.assertEqual(row['attempts'],1)
-    old=row['lease_until'];hb=a.heartbeat(jid,'worker-a',lease_seconds=60);self.assertGreaterEqual(hb['lease_until'],old)
+    old=row['lease_until'];hb=a.heartbeat(jid,'worker-a',claim_generation=row['claim_generation'],lease_seconds=60);self.assertGreaterEqual(hb['lease_until'],old)
     with self.assertRaisesRegex(AgentError,'not queued or reclaimable'):b.claim(jid,worker_id='worker-b',lease_seconds=30)
    finally:a.close();b.close()
  def test_expired_lease_reclaims_and_stale_worker_cannot_finish(self):
@@ -120,8 +132,22 @@ class AgentLeaseFailoverTests(unittest.TestCase):
     a.claim(jid,worker_id='worker-a',lease_seconds=1)
     a.db.execute('UPDATE jobs SET lease_until=? WHERE id=?',(int(time.time())-1,jid));a.db.commit()
     row=b.claim(jid,worker_id='worker-b',lease_seconds=30);self.assertEqual(row['worker_id'],'worker-b');self.assertEqual(row['attempts'],2)
-    with self.assertRaisesRegex(AgentError,'not owned'):a.finish(jid,'completed',{'old':True},worker_id='worker-a')
-    final=b.finish(jid,'completed',{'new':True},worker_id='worker-b');self.assertEqual(final['status'],'completed');self.assertIsNone(final['worker_id'])
+    with self.assertRaisesRegex(AgentError,'not owned'):a.finish(jid,'completed',{'old':True},worker_id='worker-a',claim_generation=1)
+    final=b.finish(jid,'completed',{'new':True},worker_id='worker-b',claim_generation=row['claim_generation']);self.assertEqual(final['status'],'completed');self.assertIsNone(final['worker_id'])
+   finally:a.close();b.close()
+
+ def test_same_worker_id_old_generation_cannot_mutate_reclaimed_job(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   path=Path(td)/'j.db';a=AgentJobStore(path);b=AgentJobStore(path)
+   try:
+    jid=a.create(AgentSpec('r','11'*32,'t',('repo.read',)))
+    first=a.claim(jid,worker_id='worker',lease_seconds=1);g1=first['claim_generation']
+    a.db.execute('UPDATE jobs SET lease_until=? WHERE id=?',(int(time.time())-1,jid));a.db.commit()
+    second=b.claim(jid,worker_id='worker',lease_seconds=30);g2=second['claim_generation'];self.assertGreater(g2,g1)
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):a.heartbeat(jid,'worker',claim_generation=g1,lease_seconds=30)
+    with self.assertRaisesRegex(AgentError,'not owned'):a.finish(jid,'completed',{'stale':True},worker_id='worker',claim_generation=g1)
+    self.assertEqual(b.finish(jid,'completed',{'fresh':True},worker_id='worker',claim_generation=g2)['status'],'completed')
    finally:a.close();b.close()
 
 class DaemonWorkflowTests(unittest.TestCase):
