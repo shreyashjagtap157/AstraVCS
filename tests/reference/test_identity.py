@@ -1,7 +1,7 @@
 import sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'reference'))
-from astra_identity import OrganizationStore
+from astra_identity import OrganizationStore,ROLE_CAPABILITIES
 from astra_security import TokenStore,Principal
 class IdentityTests(unittest.TestCase):
  def test_org_team_repo_roles_generate_least_privilege_grants(self):
@@ -18,4 +18,13 @@ class IdentityTests(unittest.TestCase):
    try:
     o=s.create_org('O');s.bind_repo('public',o.org_id,'public');self.assertEqual(s.effective_role('outsider','public'),'read');s.add_member(o.org_id,'root','admin');self.assertEqual(s.effective_role('root','public'),'admin')
    finally:s.close()
+
+ def test_repository_role_capabilities_are_monotonic(self):
+  roles=('read','triage','write','maintain')
+  for lower,higher in zip(roles,roles[1:]):
+   self.assertTrue(set(ROLE_CAPABILITIES[lower]).issubset(ROLE_CAPABILITIES[higher]),f'{higher} must include every {lower} capability')
+  self.assertIn('issues.write',ROLE_CAPABILITIES['maintain'])
+  self.assertIn('changes.create',ROLE_CAPABILITIES['maintain'])
+  self.assertIn('proposals.create',ROLE_CAPABILITIES['maintain'])
+
 if __name__=='__main__':unittest.main()

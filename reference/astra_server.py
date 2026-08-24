@@ -100,6 +100,17 @@ class AstraServer:
        return self._json(200,{'issue':issue,'comments':outer.platform.issue_comments(int(p[4]))})
       if p[3:]==['organization']:
        self._require('orgs.read');return self._json(200,{'binding':outer.identity.repo_binding(name)})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
+       self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       state=parse_qs(urlparse(self.path).query).get('state',[None])[0];threads=outer.platform.list_review_threads(p[4],state)
+       return self._json(200,{'threads':[dict(t,comments=outer.platform.review_thread_comments(t['id'])) for t in threads]})
+      if len(p)==5 and p[3]=='review-threads':
+       self._require('proposals.read',name);thread=outer.platform.get_review_thread(p[4])
+       if not thread:return self._json(404,{'error':'review_thread_not_found'})
+       proposal=outer.platform.get_proposal(thread['proposal_id'])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'review_thread_not_found'})
+       return self._json(200,{'thread':thread,'comments':outer.platform.review_thread_comments(p[4])})
       self._require('repo.read',name);repo=outer.registry.open(name)
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
@@ -213,6 +224,22 @@ class AstraServer:
        principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid);return self._json(201,{'id':pid,'target_revision':target_oid})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviews':
        principal=self._require('reviews.write',name);outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''));return self._json(201,{'ok':True})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
+       principal=self._require('reviews.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       tid=outer.platform.create_review_thread(p[4],body['revision_id'],body['node_id'],bytes.fromhex(body['path_hex']),principal.principal_id,body['body'],body.get('line_start'),body.get('line_end'));return self._json(201,{'id':tid})
+      if len(p)==6 and p[3]=='review-threads' and p[5]=='comments':
+       principal=self._require('reviews.write',name);thread=outer.platform.get_review_thread(p[4])
+       if not thread:return self._json(404,{'error':'review_thread_not_found'})
+       proposal=outer.platform.get_proposal(thread['proposal_id'])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'review_thread_not_found'})
+       cid=outer.platform.add_review_thread_comment(p[4],principal.principal_id,body['body']);return self._json(201,{'id':cid})
+      if len(p)==6 and p[3]=='review-threads' and p[5] in ('resolve','reopen'):
+       principal=self._require('reviews.write',name);thread=outer.platform.get_review_thread(p[4])
+       if not thread:return self._json(404,{'error':'review_thread_not_found'})
+       proposal=outer.platform.get_proposal(thread['proposal_id'])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'review_thread_not_found'})
+       row=outer.platform.resolve_review_thread(p[4],principal.principal_id,p[5]=='resolve');return self._json(200,{'thread':row})
       if len(p)==6 and p[3]=='proposals' and p[5]=='checks':
        self._require('checks.write',name);outer.platform.set_check(p[4],body['name'],body['status'],body.get('conclusion'),body.get('details',''));return self._json(200,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='merge':

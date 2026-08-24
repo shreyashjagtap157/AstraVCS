@@ -6,13 +6,21 @@ import sqlite3,uuid
 from astra_security import Grant
 
 class IdentityError(RuntimeError):pass
-ROLE_CAPABILITIES={
+_ROLE_ADDITIONS={
  'read':('repo.read','proposals.read','issues.read'),
- 'triage':('repo.read','proposals.read','issues.read','issues.write','reviews.write'),
- 'write':('repo.read','repo.write','refs.write','proposals.read','proposals.write','issues.read','issues.write','reviews.write','checks.write','changes.create','proposals.create'),
- 'maintain':('repo.read','repo.write','refs.write','proposals.read','proposals.write','proposals.merge','reviews.write','checks.write','plugins.read'),
- 'admin':('*',),
+ 'triage':('issues.write','reviews.write'),
+ 'write':('repo.write','refs.write','proposals.write','checks.write','changes.create','proposals.create'),
+ 'maintain':('proposals.merge','plugins.read'),
 }
+def _cumulative_role_capabilities():
+ out={};caps=[]
+ for role in ('read','triage','write','maintain'):
+  for cap in _ROLE_ADDITIONS[role]:
+   if cap not in caps:caps.append(cap)
+  out[role]=tuple(caps)
+ out['admin']=('*',)
+ return out
+ROLE_CAPABILITIES=_cumulative_role_capabilities()
 
 @dataclass(frozen=True)
 class Organization:org_id:str;name:str

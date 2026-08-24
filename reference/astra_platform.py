@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 import json,sqlite3,time,uuid
+from astra_model import validate_object_id,validate_node_id,validate_path
 
 class PlatformError(RuntimeError):pass
 class CollaborationStore:
@@ -15,6 +16,8 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT,repo TEXT,actor TEXT,payload TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS issues(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT,title TEXT,body TEXT,state TEXT,created_by TEXT,created_at INTEGER,updated_at INTEGER);
   CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
+  CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
+  CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
   ''');self.db.commit()
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
@@ -30,6 +33,41 @@ class CollaborationStore:
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
   self.db.execute('INSERT INTO reviews(proposal_id,reviewer,state,body,created_at) VALUES(?,?,?,?,?)',(pid,reviewer,state,body,int(time.time())));self.db.commit();self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+ def create_review_thread(self,pid,revision_id,node_id,path,author,body,line_start=None,line_end=None):
+  proposal=self.get_proposal(pid)
+  if not proposal:raise PlatformError('proposal not found')
+  validate_object_id(revision_id,'RevisionID');validate_node_id(node_id);validate_path(path)
+  if not body:raise PlatformError('review thread body must not be empty')
+  if line_start is not None and line_start<1:raise PlatformError('line_start must be positive')
+  if line_end is not None and (line_start is None or line_end<line_start):raise PlatformError('line_end must be >= line_start')
+  tid=str(uuid.uuid4());now=int(time.time())
+  self.db.execute('INSERT INTO review_threads VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(tid,pid,revision_id,node_id,path.hex(),line_start,line_end,'open',author,now,None,None));self.db.commit()
+  cid=self.add_review_thread_comment(tid,author,body,emit=False);self.emit('review.thread.opened',proposal['repo'],author,{'proposal_id':pid,'thread_id':tid,'comment_id':cid,'revision_id':revision_id,'node_id':node_id,'path_hex':path.hex()});return tid
+ def get_review_thread(self,tid):
+  r=self.db.execute('SELECT * FROM review_threads WHERE id=?',(tid,)).fetchone();return None if r is None else dict(r)
+ def list_review_threads(self,pid,state=None):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  if state is None:rows=self.db.execute('SELECT * FROM review_threads WHERE proposal_id=? ORDER BY created_at,id',(pid,))
+  else:
+   if state not in ('open','resolved'):raise PlatformError('invalid thread state')
+   rows=self.db.execute('SELECT * FROM review_threads WHERE proposal_id=? AND state=? ORDER BY created_at,id',(pid,state))
+  return [dict(x) for x in rows]
+ def add_review_thread_comment(self,tid,author,body,emit=True):
+  if not body:raise PlatformError('review thread comment must not be empty')
+  thread=self.get_review_thread(tid)
+  if not thread:raise PlatformError('review thread not found')
+  proposal=self.get_proposal(thread['proposal_id']);now=int(time.time());cur=self.db.execute('INSERT INTO review_thread_comments(thread_id,author,body,created_at) VALUES(?,?,?,?)',(tid,author,body,now));self.db.commit();cid=cur.lastrowid
+  if emit:self.emit('review.thread.comment',proposal['repo'],author,{'proposal_id':thread['proposal_id'],'thread_id':tid,'comment_id':cid})
+  return cid
+ def review_thread_comments(self,tid):
+  if not self.get_review_thread(tid):raise PlatformError('review thread not found')
+  return [dict(x) for x in self.db.execute('SELECT * FROM review_thread_comments WHERE thread_id=? ORDER BY created_at,id',(tid,))]
+ def resolve_review_thread(self,tid,actor,resolved=True):
+  thread=self.get_review_thread(tid)
+  if not thread:raise PlatformError('review thread not found')
+  proposal=self.get_proposal(thread['proposal_id']);state='resolved' if resolved else 'open';now=int(time.time())
+  self.db.execute('UPDATE review_threads SET state=?,resolved_by=?,resolved_at=? WHERE id=?',(state,actor if resolved else None,now if resolved else None,tid));self.db.commit()
+  self.emit('review.thread.'+('resolved' if resolved else 'reopened'),proposal['repo'],actor,{'proposal_id':thread['proposal_id'],'thread_id':tid});return self.get_review_thread(tid)
  def set_check(self,pid,name,status,conclusion=None,details=''):
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')

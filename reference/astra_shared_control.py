@@ -16,7 +16,7 @@ from astra_platform import PlatformError
 from astra_agents import AgentError,AgentSpec
 from astra_packages import PackageError,PackageVersion
 from astra_workspace_manifest import WorkspaceManifest,WorkspaceEntry,WorkspaceManifestError
-from astra_model import validate_object_id
+from astra_model import validate_object_id,validate_node_id,validate_path
 from astra_policy_store import SQLRefPolicyStore
 from astra_plugins import SQLPluginRegistry
 from astra_identity import ROLE_CAPABILITIES,Organization,IdentityError
@@ -34,6 +34,8 @@ class SharedControlPlane:
   self.events_t=Table('cp_events',self.meta,Column('seq',Integer,primary_key=True,autoincrement=True),Column('type',String(128)),Column('repo',String(256)),Column('actor',String(256)),Column('payload',Text),Column('created_at',Integer))
   self.issues=Table('cp_issues',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256)),Column('title',Text),Column('body',Text),Column('state',String(32)),Column('created_by',String(256)),Column('created_at',Integer),Column('updated_at',Integer))
   self.issue_comments_t=Table('cp_issue_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('issue_id',Integer),Column('author',String(256)),Column('body',Text),Column('created_at',Integer))
+  self.review_threads=Table('cp_review_threads',self.meta,Column('id',String(64),primary_key=True),Column('proposal_id',String(64),nullable=False),Column('revision_id',String(64),nullable=False),Column('node_id',String(32),nullable=False),Column('path_hex',Text,nullable=False),Column('line_start',Integer),Column('line_end',Integer),Column('state',String(16),nullable=False),Column('author',String(256),nullable=False),Column('created_at',Integer,nullable=False),Column('resolved_by',String(256)),Column('resolved_at',Integer))
+  self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
@@ -159,6 +161,42 @@ class SQLCollaborationStore:
   if not p:raise PlatformError('proposal not found')
   with self.cp.engine.begin() as c:c.execute(insert(self.cp.reviews).values(proposal_id=pid,reviewer=reviewer,state=state,body=body,created_at=int(time.time())))
   self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+ def create_review_thread(self,pid,revision_id,node_id,path,author,body,line_start=None,line_end=None):
+  proposal=self.get_proposal(pid)
+  if not proposal:raise PlatformError('proposal not found')
+  validate_object_id(revision_id,'RevisionID');validate_node_id(node_id);validate_path(path)
+  if not body:raise PlatformError('review thread body must not be empty')
+  if line_start is not None and line_start<1:raise PlatformError('line_start must be positive')
+  if line_end is not None and (line_start is None or line_end<line_start):raise PlatformError('line_end must be >= line_start')
+  tid=str(uuid.uuid4());now=int(time.time())
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.review_threads).values(id=tid,proposal_id=pid,revision_id=revision_id,node_id=node_id,path_hex=path.hex(),line_start=line_start,line_end=line_end,state='open',author=author,created_at=now,resolved_by=None,resolved_at=None))
+  cid=self.add_review_thread_comment(tid,author,body,emit=False);self.emit('review.thread.opened',proposal['repo'],author,{'proposal_id':pid,'thread_id':tid,'comment_id':cid,'revision_id':revision_id,'node_id':node_id,'path_hex':path.hex()});return tid
+ def get_review_thread(self,tid):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.review_threads).where(self.cp.review_threads.c.id==tid)).mappings().first();return None if r is None else dict(r)
+ def list_review_threads(self,pid,state=None):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  cond=self.cp.review_threads.c.proposal_id==pid
+  if state is not None:
+   if state not in ('open','resolved'):raise PlatformError('invalid thread state')
+   cond=and_(cond,self.cp.review_threads.c.state==state)
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.review_threads).where(cond).order_by(self.cp.review_threads.c.created_at,self.cp.review_threads.c.id)).mappings()]
+ def add_review_thread_comment(self,tid,author,body,emit=True):
+  if not body:raise PlatformError('review thread comment must not be empty')
+  thread=self.get_review_thread(tid)
+  if not thread:raise PlatformError('review thread not found')
+  proposal=self.get_proposal(thread['proposal_id']);now=int(time.time())
+  with self.cp.engine.begin() as c:r=c.execute(insert(self.cp.review_thread_comments).values(thread_id=tid,author=author,body=body,created_at=now));cid=r.inserted_primary_key[0]
+  if emit:self.emit('review.thread.comment',proposal['repo'],author,{'proposal_id':thread['proposal_id'],'thread_id':tid,'comment_id':cid})
+  return cid
+ def review_thread_comments(self,tid):
+  if not self.get_review_thread(tid):raise PlatformError('review thread not found')
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.review_thread_comments).where(self.cp.review_thread_comments.c.thread_id==tid).order_by(self.cp.review_thread_comments.c.created_at,self.cp.review_thread_comments.c.id)).mappings()]
+ def resolve_review_thread(self,tid,actor,resolved=True):
+  thread=self.get_review_thread(tid)
+  if not thread:raise PlatformError('review thread not found')
+  proposal=self.get_proposal(thread['proposal_id']);state='resolved' if resolved else 'open';now=int(time.time())
+  with self.cp.engine.begin() as c:c.execute(update(self.cp.review_threads).where(self.cp.review_threads.c.id==tid).values(state=state,resolved_by=actor if resolved else None,resolved_at=now if resolved else None))
+  self.emit('review.thread.'+('resolved' if resolved else 'reopened'),proposal['repo'],actor,{'proposal_id':thread['proposal_id'],'thread_id':tid});return self.get_review_thread(tid)
  def set_check(self,pid,name,status,conclusion=None,details=''):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')

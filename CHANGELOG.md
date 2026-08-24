@@ -1,3 +1,11 @@
+## 0.37.0 - Monotonic roles and inline review threads
+
+- Made repository role capabilities cumulative so promotion from read → triage → write → maintain never removes privileges.
+- Added first-class inline review threads anchored to Proposal ID, RevisionID, NodeID, raw path bytes, and optional line ranges.
+- Added durable thread comments, resolve/reopen lifecycle, typed platform events, local SQLite persistence, and dialect-neutral shared SQL persistence for HA nodes.
+- Added capability-gated HTTP review-thread APIs and typed web-client methods.
+- Added identity/review-thread architecture documentation and validation of malformed review anchors/ranges.
+
 ## 0.36.0 - Hosted organizations and role-derived authorization
 
 - Wired organizations, teams, repository bindings/visibility, direct/team roles, and effective-role grants into the hosted API instead of leaving them as a local-only library.
