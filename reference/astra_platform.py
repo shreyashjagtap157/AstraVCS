@@ -202,12 +202,29 @@ class CollaborationStore:
   row=dict(row);updated=self.db.execute("UPDATE merge_queue SET state='processing',worker_id=?,lease_until=?,attempts=attempts+1,updated_at=? WHERE id=? AND (state='queued' OR (state='processing' AND lease_until IS NOT NULL AND lease_until<=?))",(worker_id,now+lease_seconds,now,row['id'],now));self.db.commit()
   if updated.rowcount!=1:return None
   event='merge_queue.reclaimed' if row['state']=='processing' else 'merge_queue.processing';self.emit(event,repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref,'worker_id':worker_id,'lease_until':now+lease_seconds});return self.merge_queue_entry(row['proposal_id'])
- def release_merge_claim(self,pid,actor,worker_id=None):
+ def renew_merge_claim(self,pid,actor,worker_id=None,attempt=None,lease_seconds=60):
+  if lease_seconds<1 or lease_seconds>3600:raise PlatformError('merge queue lease must be between 1 and 3600 seconds')
   row=self.merge_queue_entry(pid)
   if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
-  worker_id=worker_id or actor;updated=self.db.execute("UPDATE merge_queue SET state='queued',worker_id=NULL,lease_until=NULL,updated_at=? WHERE proposal_id=? AND state='processing' AND worker_id=?",(int(time.time()),pid,worker_id));self.db.commit()
-  if updated.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker')
-  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id});return self.merge_queue_entry(pid)
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt;now=int(time.time())
+  updated=self.db.execute("UPDATE merge_queue SET lease_until=?,updated_at=? WHERE proposal_id=? AND state='processing' AND worker_id=? AND attempts=?",(now+lease_seconds,now,pid,worker_id,attempt));self.db.commit()
+  if updated.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.renewed',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt,'lease_until':now+lease_seconds});return self.merge_queue_entry(pid)
+ def finish_merge_claim(self,pid,actor,state,worker_id=None,attempt=None):
+  if state not in ('merged','stale','cancelled'):raise PlatformError('invalid merge queue terminal state')
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt
+  updated=self.db.execute("UPDATE merge_queue SET state=?,worker_id=NULL,lease_until=NULL,updated_at=? WHERE proposal_id=? AND state='processing' AND worker_id=? AND attempts=?",(state,int(time.time()),pid,worker_id,attempt));self.db.commit()
+  if updated.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt});return self.merge_queue_entry(pid)
+ def release_merge_claim(self,pid,actor,worker_id=None,attempt=None):
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt
+  updated=self.db.execute("UPDATE merge_queue SET state='queued',worker_id=NULL,lease_until=NULL,updated_at=? WHERE proposal_id=? AND state='processing' AND worker_id=? AND attempts=?",(int(time.time()),pid,worker_id,attempt));self.db.commit()
+  if updated.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt});return self.merge_queue_entry(pid)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')

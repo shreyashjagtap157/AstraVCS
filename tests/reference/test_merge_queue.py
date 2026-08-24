@@ -45,7 +45,7 @@ class MergeQueueTests(unittest.TestCase):
      barrier.wait();results.append(store.claim_merge_head('r','refs/heads/main',actor))
     x=threading.Thread(target=claim,args=(a,'a'));y=threading.Thread(target=claim,args=(b,'b'));x.start();y.start();x.join();y.join()
     self.assertEqual(sum(r is not None for r in results),1);self.assertEqual(a.merge_queue_entry(pid)['state'],'processing');self.assertIsNone(b.merge_queue_head('r','refs/heads/main'))
-    winner='a' if results[0] is not None else 'b';a.release_merge_claim(pid,winner);self.assertEqual(b.merge_queue_entry(pid)['state'],'queued')
+    claimed=a.merge_queue_entry(pid);a.release_merge_claim(pid,claimed['worker_id'],worker_id=claimed['worker_id'],attempt=claimed['attempts']);self.assertEqual(b.merge_queue_entry(pid)['state'],'queued')
    finally:cp.close();other.close()
  def test_expired_claim_is_reclaimed_cross_node_and_owner_fenced(self):
   with tempfile.TemporaryDirectory() as td:
@@ -58,4 +58,19 @@ class MergeQueueTests(unittest.TestCase):
     b.release_merge_claim(pid,'u',worker_id='worker-b');self.assertEqual(a.merge_queue_entry(pid)['state'],'queued')
     events=[e['type'] for e in a.events()];self.assertIn('merge_queue.reclaimed',events)
    finally:cp.close();other.close()
+
+ def test_claim_generation_fences_stale_worker_terminal_and_renewal(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);cp=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs'));other=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs2'));a=cp.platform_store;b=other.platform_store
+   try:
+    pid=a.open_proposal('r','refs/heads/main','a'*64,'u','b'*64);a.enqueue_merge(pid,'u');first=a.claim_merge_head('r','refs/heads/main','u',worker_id='worker-a',lease_seconds=30);gen1=first['attempts']
+    renewed=a.renew_merge_claim(pid,'u',worker_id='worker-a',attempt=gen1,lease_seconds=120);self.assertGreaterEqual(renewed['lease_until'],first['lease_until'])
+    with cp.engine.begin() as c:c.execute(cp.merge_queue.update().where(cp.merge_queue.c.proposal_id==pid).values(lease_until=0))
+    second=b.claim_merge_head('r','refs/heads/main','u',worker_id='worker-b',lease_seconds=30);self.assertGreater(second['attempts'],gen1)
+    with self.assertRaisesRegex(Exception,'worker generation'):a.finish_merge_claim(pid,'u','merged',worker_id='worker-a',attempt=gen1)
+    with self.assertRaisesRegex(Exception,'worker generation'):a.renew_merge_claim(pid,'u',worker_id='worker-a',attempt=gen1)
+    b.finish_merge_claim(pid,'u','merged',worker_id='worker-b',attempt=second['attempts']);self.assertEqual(a.merge_queue_entry(pid)['state'],'merged')
+    events=[e['type'] for e in a.events()];self.assertIn('merge_queue.renewed',events);self.assertIn('merge_queue.merged',events)
+   finally:cp.close();other.close()
+
 if __name__=='__main__':unittest.main()

@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.54.0`
+`v0.55.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.54.0` adds recoverable HA merge-queue processing leases with worker fencing, bounded claim expiry, atomic cross-node reclamation, and attempt accounting on top of the protected merge queue. Revision-scoped evidence, stable pagination, source CAS, inline review, protected-ref policy, mergeability, Repository Format 1, compatibility, and self-hosting remain integrated.
+`v0.55.0.0` adds generation-fenced merge-queue ownership: workers can renew leases, and every renew/release/terminal transition is bound to both worker identity and claim generation so an expired, reclaimed worker cannot mutate the newer claim. The release also adopts canonical four-part `stable.major.minor.patch` product versioning with deterministic SemVer adapters for npm/Cargo. Revision-scoped evidence, stable pagination, source CAS, inline review, protected-ref policy, mergeability, Repository Format 1, compatibility, and self-hosting remain integrated.
 
 ## Validation available in this environment
 

@@ -356,16 +356,17 @@ class AstraServer:
        if not head:return self._json(200,{'processed':False})
        proposal=outer.platform.get_proposal(head['proposal_id'])
        if not proposal or proposal['repo']!=name or proposal['status']!='open' or proposal['source_revision']!=head['source_revision']:
-        outer.platform.cancel_merge(head['proposal_id'],principal.principal_id,'stale');return self._json(409,{'error':'merge_queue_entry_stale','proposal_id':head['proposal_id']})
+        outer.platform.finish_merge_claim(head['proposal_id'],principal.principal_id,'stale',worker_id=outer.worker_id,attempt=head['attempts']);return self._json(409,{'error':'merge_queue_entry_stale','proposal_id':head['proposal_id']})
        if proposal.get('draft'):raise ValueError('draft proposal cannot be merged')
        ref=target_ref.encode()
        if proposal['target_ref']!=target_ref:raise ValueError('merge queue target mismatch')
        self._require(outer.policy.required_capability(ref),name);policy=outer.policy.policy_for(ref)
        if policy:outer.platform.require_policy(proposal['id'],policy);self._require_code_owner_reviews(name,proposal['id'],policy)
+       head=outer.platform.renew_merge_claim(head['proposal_id'],principal.principal_id,worker_id=outer.worker_id,attempt=head['attempts'])
        repo=outer.registry.open(name);view=repo.current_view();refs=dict(view.refs);current=refs.get(ref)
        if current is None:merged=proposal['source_revision']
        else:merged=MergeEngine(repo).create_merge_revision(current,proposal['source_revision'])
-       refs[ref]=merged;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'merge-queue',expected_head=repo.operation_head());outer.platform.close_proposal(proposal['id'],principal.principal_id,'merged');outer.platform.cancel_merge(proposal['id'],principal.principal_id,'merged');return self._json(200,{'processed':True,'proposal_id':proposal['id'],'revision':merged})
+       refs[ref]=merged;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'merge-queue',expected_head=repo.operation_head());outer.platform.close_proposal(proposal['id'],principal.principal_id,'merged');outer.platform.finish_merge_claim(proposal['id'],principal.principal_id,'merged',worker_id=outer.worker_id,attempt=head['attempts']);return self._json(200,{'processed':True,'proposal_id':proposal['id'],'revision':merged})
       if len(p)==6 and p[3]=='proposals' and p[5]=='merge':
        principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')

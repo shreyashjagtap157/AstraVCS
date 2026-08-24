@@ -1,3 +1,10 @@
+## 0.55.0.0 - Generation-fenced merge queue and four-part product versioning
+
+- Adopted canonical four-part product versions as `stable.major.minor.patch`; package ecosystems that require SemVer use the deterministic adapter `<stable>.<major>.<minor>-astra.<patch>`.
+- Added generation-fenced merge-queue claim renewal and terminal completion so a worker whose expired lease was reclaimed cannot complete, renew, or release a newer worker generation.
+- Renewed queue ownership immediately before canonical protected-ref integration and made stale/merged terminal transitions owner-generation fenced.
+- Added typed `merge_queue.renewed` events and permanent cross-node stale-worker fencing regression coverage.
+
 ## 0.54.0 - Recoverable HA merge queue leases
 
 - Added bounded processing leases to protected merge-queue claims so crashed hosting nodes cannot permanently strand a target queue.

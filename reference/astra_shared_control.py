@@ -389,13 +389,29 @@ class SQLCollaborationStore:
   with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.id==row['id'],reclaimable)).values(state='processing',worker_id=worker_id,lease_until=now+lease_seconds,attempts=self.cp.merge_queue.c.attempts+1,updated_at=now))
   if r.rowcount!=1:return None
   event='merge_queue.reclaimed' if row['state']=='processing' else 'merge_queue.processing';self.emit(event,repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref,'worker_id':worker_id,'lease_until':now+lease_seconds});return self.merge_queue_entry(row['proposal_id'])
- def release_merge_claim(self,pid,actor,worker_id=None):
+ def renew_merge_claim(self,pid,actor,worker_id=None,attempt=None,lease_seconds=60):
+  if lease_seconds<1 or lease_seconds>3600:raise PlatformError('merge queue lease must be between 1 and 3600 seconds')
   row=self.merge_queue_entry(pid)
   if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
-  worker_id=worker_id or actor
-  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.worker_id==worker_id)).values(state='queued',worker_id=None,lease_until=None,updated_at=int(time.time())))
-  if r.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker')
-  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id});return self.merge_queue_entry(pid)
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt;now=int(time.time())
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.worker_id==worker_id,self.cp.merge_queue.c.attempts==attempt)).values(lease_until=now+lease_seconds,updated_at=now))
+  if r.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.renewed',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt,'lease_until':now+lease_seconds});return self.merge_queue_entry(pid)
+ def finish_merge_claim(self,pid,actor,state,worker_id=None,attempt=None):
+  if state not in ('merged','stale','cancelled'):raise PlatformError('invalid merge queue terminal state')
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.worker_id==worker_id,self.cp.merge_queue.c.attempts==attempt)).values(state=state,worker_id=None,lease_until=None,updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt});return self.merge_queue_entry(pid)
+ def release_merge_claim(self,pid,actor,worker_id=None,attempt=None):
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
+  worker_id=worker_id or actor;attempt=row['attempts'] if attempt is None else attempt
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing',self.cp.merge_queue.c.worker_id==worker_id,self.cp.merge_queue.c.attempts==attempt)).values(state='queued',worker_id=None,lease_until=None,updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('merge queue claim is not owned by worker generation')
+  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref'],'worker_id':worker_id,'attempt':attempt});return self.merge_queue_entry(pid)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')
