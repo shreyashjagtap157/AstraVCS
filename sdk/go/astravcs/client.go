@@ -46,6 +46,19 @@ func (c *Client) do(method, path string, body any, out any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
+type CompatibilityDescriptor struct {
+	ProductVersion string `json:"product_version"`
+	APIVersions []int `json:"api_versions"`
+	RepositoryFormats []int `json:"repository_formats"`
+	BundleFormats []int `json:"bundle_formats"`
+	SemanticSchemas []int `json:"semantic_schemas"`
+	SyncProtocolVersions []int `json:"sync_protocol_versions"`
+}
+func (c *Client) Capabilities() (CompatibilityDescriptor,error) {
+	var x CompatibilityDescriptor
+	e:=c.do("GET","/v1/capabilities",nil,&x)
+	return x,e
+}
 func (c *Client) Repositories() ([]string, error) {
 	var x struct {
 		Repositories []string `json:"repositories"`

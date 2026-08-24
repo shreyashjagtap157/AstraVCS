@@ -18,6 +18,7 @@ from astra_workspace_manifest import WorkspaceEntry,WorkspaceManifest,WorkspaceM
 from astra_packages import PackageRegistry
 from astra_agents import AgentJobStore,AgentSpec,AgentCoordinator
 from astra_version import product_version
+from astra_protocol import CURRENT_COMPATIBILITY
 from astra_plugins import PluginRegistry,PluginManifest
 from astra_policy_store import SQLRefPolicyStore
 from astra_automation import PluginCatalog
@@ -61,6 +62,7 @@ class AstraServer:
     try:
      p=self._parts()
      if p==['v1','health']:return self._json(200,{'status':'ok','api':'v1'})
+     if p==['v1','capabilities']:return self._json(200,{'product_version':product_version(),**CURRENT_COMPATIBILITY.canonical()})
      if p==['v1','repos']:
       self._require('repos.list');return self._json(200,{'repositories':outer.registry.list()})
      if p==['v1','plugins']:

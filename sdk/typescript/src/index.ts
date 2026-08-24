@@ -1,5 +1,6 @@
 export interface RefRecord { refs: [string,string][]; operation_head: string|null }
 export interface RepositoryList { repositories: string[] }
+export interface CompatibilityDescriptor { product_version:string; api_versions:number[]; repository_formats:number[]; bundle_formats:number[]; semantic_schemas:number[]; sync_protocol_versions:number[] }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
 export interface Issue { id:number; repo:string; title:string; body:string; state:string; created_by:string; created_at:number; updated_at:number }
 export interface IssueComment { id:number; issue_id:number; author:string; body:string; created_at:number }
@@ -14,6 +15,7 @@ export class AstraApi {
     const body=await response.json().catch(()=>({error:`HTTP ${response.status}`})) as Record<string,unknown>;
     if(!response.ok) throw new Error(String(body.error ?? `HTTP ${response.status}`)); return body as T;
   }
+  capabilities():Promise<CompatibilityDescriptor>{return this.request('/v1/capabilities')}
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}

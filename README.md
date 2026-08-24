@@ -4,11 +4,11 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.30.0` — Repository Format 1 portable-bundle compatibility milestone.
+`v0.31.0` — explicit compatibility-negotiation milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-`v0.30.0` adds Repository Format 1-bound portable Bundle Format 2, independent archive verification, and backward reading of legacy bundle-v1 archives while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
+`v0.31.0` adds explicit API/repository/bundle/schema/sync capability negotiation on top of Repository Format 1 and portable Bundle Format 2 while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
 
 The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 

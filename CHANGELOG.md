@@ -1,3 +1,10 @@
+## 0.31.0 - Explicit compatibility negotiation
+
+- Added a typed compatibility descriptor covering API, repository, portable-bundle, semantic-schema, and synchronization-protocol versions.
+- Added `/v1/capabilities` and client-side highest-common-version negotiation; resumable HTTP synchronization now negotiates before creating a transfer plan.
+- Compatibility fails closed when any required version dimension has no common value, rather than relying on product-version strings or endpoint probing.
+- Added compatibility-negotiation specification and server/client regression coverage.
+
 ## 0.30.0 - Portable Bundle Format 2
 
 - Introduced `astravcs-bundle-v2`, binding portable backup/transfer archives to Repository Format 1 instead of leaving repository compatibility implicit.

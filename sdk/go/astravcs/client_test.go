@@ -62,3 +62,8 @@ func TestIssues(t *testing.T) {
 		t.Fatalf("%v %v", issues, e)
 	}
 }
+
+func TestCapabilities(t *testing.T) {
+ s:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){w.Header().Set("Content-Type","application/json");w.Write([]byte(`{"product_version":"0.31.0","api_versions":[1],"repository_formats":[1],"bundle_formats":[1,2],"semantic_schemas":[0,1],"sync_protocol_versions":[1]}`))}));defer s.Close()
+ c,e:=New(s.URL,"t").Capabilities();if e!=nil||c.ProductVersion!="0.31.0"||len(c.BundleFormats)!=2||c.SyncProtocolVersions[0]!=1{t.Fatalf("%v %v",c,e)}
+}

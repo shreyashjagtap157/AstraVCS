@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile,urllib.request,json
 from astra_portable_bundle import apply_portable_bundle,create_portable_bundle
+from astra_protocol import CompatibilityDescriptor,CURRENT_COMPATIBILITY,CompatibilityError
 class HTTPSyncError(RuntimeError):pass
 class HTTPSyncClient:
  def __init__(self,base_url,token):self.base=base_url.rstrip('/');self.token=token
@@ -12,6 +13,13 @@ class HTTPSyncClient:
   r=urllib.request.Request(self.base+path,data=data,method=method,headers=headers)
   try:return urllib.request.urlopen(r).read()
   except Exception as exc:raise HTTPSyncError(str(exc)) from exc
+ def capabilities(self):
+  try:return CompatibilityDescriptor.from_dict(json.loads(self._request('GET','/v1/capabilities')))
+  except CompatibilityError:raise
+  except Exception as exc:raise HTTPSyncError('invalid server compatibility descriptor') from exc
+ def negotiate(self,local=CURRENT_COMPATIBILITY):
+  try:return local.negotiate(self.capabilities())
+  except CompatibilityError as exc:raise HTTPSyncError(str(exc)) from exc
  def fetch_bundle(self,repo_name,destination_repo):
   raw=self._request('GET',f'/v1/repos/{repo_name}/bundle')
   with tempfile.NamedTemporaryFile(suffix='.astra') as f:
@@ -30,6 +38,8 @@ class HTTPResumableSyncSession:
   import hashlib,json
   from astra_resumable_sync import sync_plan_from_dict
   self.client=HTTPSyncClient(base_url,token);self.repo_name=repo_name;self.dst=destination_repo;self.ref_prefix=ref_prefix
+  negotiated=self.client.negotiate()
+  if negotiated.sync_protocol_versions!=1:raise HTTPSyncError('unsupported negotiated synchronization protocol')
   body=json.dumps({'include_content':include_content,'path_prefixes':[p.hex() for p in path_prefixes]},sort_keys=True,separators=(',',':')).encode()
   raw=self.client._request('POST',f'/v1/repos/{repo_name}/sync/plan',body,'application/json');data=json.loads(raw);self.plan=sync_plan_from_dict(data)
   if data.get('plan_hash')!=self.plan.plan_hash:raise HTTPSyncError('server plan hash mismatch')
