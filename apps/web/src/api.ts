@@ -2,7 +2,7 @@ export interface RefRecord { refs: [string,string][]; operation_head: string|nul
 export interface RepositoryList { repositories: string[] }
 export interface ReviewEvidence { id:number; proposal_id:string; reviewer:string; state:'approved'|'changes_requested'|'commented'; body:string; created_at:number; source_revision:string }
 export interface CheckEvidence { id:number; proposal_id:string; name:string; status:string; conclusion:string|null; details:string; updated_at:number; source_revision:string }
-export interface MergeQueueEntry { id:number; repo:string; target_ref:string; proposal_id:string; source_revision:string; state:'queued'|'merged'|'cancelled'|'stale'; enqueued_by:string; enqueued_at:number; updated_at:number }
+export interface MergeQueueEntry { id:number; repo:string; target_ref:string; proposal_id:string; source_revision:string; state:'queued'|'processing'|'merged'|'cancelled'|'stale'; enqueued_by:string; enqueued_at:number; updated_at:number }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number; draft:number|boolean }
 export interface Mergeability { mergeable:boolean; blockers:Array<{type:string;message:string;[key:string]:unknown}>; proposal_id?:string; source_revision?:string; current_target?:string|null; expected_target?:string|null }
 export interface ReviewThread { id:string; proposal_id:string; revision_id:string; node_id:string; path_hex:string; line_start:number|null; line_end:number|null; state:'open'|'resolved'; author:string; created_at:number; resolved_by:string|null; resolved_at:number|null; comments?:ReviewThreadComment[]; outdated?:boolean }

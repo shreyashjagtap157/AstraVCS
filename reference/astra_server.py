@@ -352,7 +352,7 @@ class AstraServer:
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
        return self._json(200,{'entry':outer.platform.cancel_merge(p[4],principal.principal_id)})
       if p[3:]==['merge-queue','process']:
-       principal=self._require('proposals.merge',name);target_ref=body['target_ref'];head=outer.platform.merge_queue_head(name,target_ref)
+       principal=self._require('proposals.merge',name);target_ref=body['target_ref'];head=outer.platform.claim_merge_head(name,target_ref,principal.principal_id)
        if not head:return self._json(200,{'processed':False})
        proposal=outer.platform.get_proposal(head['proposal_id'])
        if not proposal or proposal['repo']!=name or proposal['status']!='open' or proposal['source_revision']!=head['source_revision']:

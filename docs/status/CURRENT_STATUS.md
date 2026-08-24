@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.52.0`
+`v0.53.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.52.0` adds durable protected merge queues with source-Revision pinning, policy revalidation, head-only serialized processing, shared-SQL HA visibility, and typed API/client support. Revision-scoped evidence, stable pagination, source CAS, inline review, protected-ref policy, mergeability, Repository Format 1, compatibility, and self-hosting remain integrated.
+`v0.53.0` adds durable protected merge queues with source-Revision pinning, policy revalidation, head-only serialized processing, shared-SQL HA visibility, and typed API/client support. Revision-scoped evidence, stable pagination, source CAS, inline review, protected-ref policy, mergeability, Repository Format 1, compatibility, and self-hosting remain integrated.
 
 ## Validation available in this environment
 

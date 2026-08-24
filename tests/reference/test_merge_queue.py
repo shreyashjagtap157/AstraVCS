@@ -34,4 +34,17 @@ class MergeQueueTests(unittest.TestCase):
    try:
     pid=a.open_proposal('r','refs/heads/main','a'*64,'u','b'*64);a.enqueue_merge(pid,'u');self.assertEqual(b.merge_queue_head('r','refs/heads/main')['proposal_id'],pid);b.cancel_merge(pid,'v');self.assertEqual(a.merge_queue_entry(pid)['state'],'cancelled')
    finally:cp.close();b.cp.close()
+ def test_atomic_claim_allows_only_one_node(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);cp=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs'));other=SharedControlPlane('sqlite:///'+str(root/'cp.db'),FileBlobBackend(root/'blobs2'));a=cp.platform_store;b=other.platform_store
+   try:
+    pid=a.open_proposal('r','refs/heads/main','a'*64,'u','b'*64);a.enqueue_merge(pid,'u')
+    import threading
+    barrier=threading.Barrier(2);results=[]
+    def claim(store,actor):
+     barrier.wait();results.append(store.claim_merge_head('r','refs/heads/main',actor))
+    x=threading.Thread(target=claim,args=(a,'a'));y=threading.Thread(target=claim,args=(b,'b'));x.start();y.start();x.join();y.join()
+    self.assertEqual(sum(r is not None for r in results),1);self.assertEqual(a.merge_queue_entry(pid)['state'],'processing');self.assertIsNone(b.merge_queue_head('r','refs/heads/main'))
+    winner='a' if results[0] is not None else 'b';a.release_merge_claim(pid,winner);self.assertEqual(b.merge_queue_entry(pid)['state'],'queued')
+   finally:cp.close();other.close()
 if __name__=='__main__':unittest.main()

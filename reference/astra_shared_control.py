@@ -363,19 +363,31 @@ class SQLCollaborationStore:
  def merge_queue_entry(self,pid):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(self.cp.merge_queue.c.proposal_id==pid)).mappings().first();return None if r is None else dict(r)
  def list_merge_queue(self,repo,target_ref=None,state='queued'):
-  if state not in ('queued','merged','cancelled','stale'):raise PlatformError('invalid merge queue state')
+  if state not in ('queued','processing','merged','cancelled','stale'):raise PlatformError('invalid merge queue state')
   cond=and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.state==state)
   if target_ref is not None:cond=and_(cond,self.cp.merge_queue.c.target_ref==target_ref)
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.merge_queue).where(cond).order_by(self.cp.merge_queue.c.id)).mappings()]
  def cancel_merge(self,pid,actor,state='cancelled'):
   if state not in ('cancelled','stale','merged'):raise PlatformError('invalid merge queue terminal state')
   row=self.merge_queue_entry(pid)
-  if not row or row['state']!='queued':raise PlatformError('proposal is not queued')
-  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='queued')).values(state=state,updated_at=int(time.time())))
-  if r.rowcount!=1:raise PlatformError('proposal is not queued')
+  if not row or row['state'] not in ('queued','processing'):raise PlatformError('proposal is not queued or processing')
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state.in_(('queued','processing')))).values(state=state,updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
   self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
  def merge_queue_head(self,repo,target_ref):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.target_ref==target_ref,self.cp.merge_queue.c.state=='queued')).order_by(self.cp.merge_queue.c.id).limit(1)).mappings().first();return None if r is None else dict(r)
+ def claim_merge_head(self,repo,target_ref,actor):
+  row=self.merge_queue_head(repo,target_ref)
+  if not row:return None
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.id==row['id'],self.cp.merge_queue.c.state=='queued')).values(state='processing',updated_at=int(time.time())))
+  if r.rowcount!=1:return None
+  self.emit('merge_queue.processing',repo,actor,{'proposal_id':row['proposal_id'],'target_ref':target_ref});return self.merge_queue_entry(row['proposal_id'])
+ def release_merge_claim(self,pid,actor):
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='processing':raise PlatformError('proposal is not processing')
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='processing')).values(state='queued',updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('merge queue entry changed concurrently')
+  self.emit('merge_queue.requeued',row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')

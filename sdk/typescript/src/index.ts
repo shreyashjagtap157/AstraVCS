@@ -3,7 +3,7 @@ export interface RepositoryList { repositories: string[] }
 export interface CompatibilityDescriptor { product_version:string; api_versions:number[]; repository_formats:number[]; bundle_formats:number[]; semantic_schemas:number[]; sync_protocol_versions:number[] }
 export interface ReviewEvidence { id:number; proposal_id:string; reviewer:string; state:'approved'|'changes_requested'|'commented'; body:string; created_at:number; source_revision:string }
 export interface CheckEvidence { id:number; proposal_id:string; name:string; status:string; conclusion:string|null; details:string; updated_at:number; source_revision:string }
-export interface MergeQueueEntry { id:number; repo:string; target_ref:string; proposal_id:string; source_revision:string; state:'queued'|'merged'|'cancelled'|'stale'; enqueued_by:string; enqueued_at:number; updated_at:number }
+export interface MergeQueueEntry { id:number; repo:string; target_ref:string; proposal_id:string; source_revision:string; state:'queued'|'processing'|'merged'|'cancelled'|'stale'; enqueued_by:string; enqueued_at:number; updated_at:number }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
 export interface Issue { id:number; repo:string; title:string; body:string; state:string; created_by:string; created_at:number; updated_at:number }
 export interface IssueComment { id:number; issue_id:number; author:string; body:string; created_at:number }

@@ -1,3 +1,10 @@
+## 0.53.0 - HA-safe merge queue claiming
+
+- Added atomic merge-queue head claiming so concurrent hosting nodes cannot process the same protected-ref queue entry simultaneously.
+- Added an explicit `processing` lifecycle state plus typed `merge_queue.processing` and `merge_queue.requeued` events.
+- Added fail-closed conditional queue transitions for terminal and release operations across local SQLite and shared SQL stores.
+- Extended TypeScript/web queue typing and added a cross-node concurrency regression proving exactly one claim winner.
+
 ## 0.52.0 - Protected merge queue
 
 - Added first-class durable merge queues for protected proposal integration, kept strictly in collaboration metadata.
