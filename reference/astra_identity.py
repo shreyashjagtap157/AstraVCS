@@ -75,6 +75,11 @@ class OrganizationStore:
   return [dict(x) for x in self.db.execute('SELECT principal,role FROM members WHERE org=? ORDER BY principal',(org,))]
  def list_teams(self,org):
   return [dict(x) for x in self.db.execute('SELECT id,name FROM teams WHERE org=? ORDER BY name,id',(org,))]
+ def team_ids_for_principal(self,principal,repo=None):
+  if repo is None:return tuple(x['team'] for x in self.db.execute('SELECT team FROM team_members WHERE principal=? ORDER BY team',(principal,)))
+  binding=self.repo_binding(repo)
+  if not binding:return ()
+  return tuple(x['team'] for x in self.db.execute('SELECT tm.team FROM team_members tm JOIN teams t ON t.id=tm.team WHERE tm.principal=? AND t.org=? ORDER BY tm.team',(principal,binding['org'])))
  def repo_binding(self,repo):
   r=self.db.execute('SELECT repo,org,visibility FROM repo_bindings WHERE repo=?',(repo,)).fetchone();return None if r is None else dict(r)
  def grants_for(self,principal,repo):

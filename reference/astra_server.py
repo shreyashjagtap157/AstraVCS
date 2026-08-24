@@ -100,6 +100,10 @@ class AstraServer:
        return self._json(200,{'issue':issue,'comments':outer.platform.issue_comments(int(p[4]))})
       if p[3:]==['organization']:
        self._require('orgs.read');return self._json(200,{'binding':outer.identity.repo_binding(name)})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='reviewers':
+       self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       state=parse_qs(urlparse(self.path).query).get('state',[None])[0];return self._json(200,{'reviewers':outer.platform.list_requested_reviewers(p[4],state)})
       if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
        self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -226,8 +230,14 @@ class AstraServer:
        principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
        source_revision=body['source_revision'];repo.get(ObjectType.REVISION,source_revision);row=outer.platform.update_proposal_source(p[4],source_revision,principal.principal_id,body.get('expected_old',proposal['source_revision']));return self._json(200,{'proposal':row})
+      if len(p)==6 and p[3]=='proposals' and p[5] in ('request-reviewers','remove-reviewers'):
+       principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       principals=tuple(body.get('reviewers',[]));teams=tuple(body.get('teams',[]))
+       rows=outer.platform.request_reviewers(p[4],principal.principal_id,principals,teams) if p[5]=='request-reviewers' else outer.platform.remove_requested_reviewers(p[4],principal.principal_id,principals,teams)
+       return self._json(200,{'reviewers':rows})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviews':
-       principal=self._require('reviews.write',name);outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''));return self._json(201,{'ok':True})
+       principal=self._require('reviews.write',name);teams=outer.identity.team_ids_for_principal(principal.principal_id,name) if hasattr(outer.identity,'team_ids_for_principal') else ();outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''),teams);return self._json(201,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
        principal=self._require('reviews.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})

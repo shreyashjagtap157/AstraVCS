@@ -1,3 +1,11 @@
+## 0.41.0 - Requested reviewers and team review lifecycle
+
+- Added durable requested-reviewer state for principals and teams, including request, removal, fulfillment, and source-refresh re-request transitions.
+- Made requested-review state consistent across local SQLite and shared SQL/HA collaboration stores.
+- Fulfilled requested team reviews only from current organization team membership resolved by the hosted identity store.
+- Added capability-gated hosted reviewer request/list/remove APIs and typed web-client support.
+- Added regression coverage for idempotent reviewer requests, team fulfillment, stale-source re-request, cross-node visibility, and invalid request states.
+
 ## 0.40.0 - Resolved-review-thread merge policy
 
 - Added an optional `require_resolved_threads` protected-ref policy field with backward-compatible persistence migration.

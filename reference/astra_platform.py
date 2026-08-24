@@ -18,6 +18,7 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(proposal_id,subject_kind,subject));
   ''')
   review_cols={r['name'] for r in self.db.execute('PRAGMA table_info(reviews)')}
   if 'source_revision' not in review_cols:self.db.execute('ALTER TABLE reviews ADD COLUMN source_revision TEXT')
@@ -40,12 +41,39 @@ class CollaborationStore:
   if not p:raise PlatformError('proposal not found')
   if p['status']!='open':raise PlatformError('proposal is not open')
   if expected_old is not None and p['source_revision']!=expected_old:raise PlatformError('proposal source advanced')
-  self.db.execute('UPDATE proposals SET source_revision=? WHERE id=?',(source_revision,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision});return self.get_proposal(pid)
- def add_review(self,pid,reviewer,state,body=''):
+  now=int(time.time());self.db.execute('UPDATE proposals SET source_revision=? WHERE id=?',(source_revision,pid));cur=self.db.execute("UPDATE proposal_reviewers SET state='requested',updated_at=? WHERE proposal_id=? AND state='fulfilled'",(now,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':cur.rowcount});return self.get_proposal(pid)
+ def request_reviewers(self,pid,actor,principals=(),teams=()):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  items=[('principal',x) for x in principals]+[('team',x) for x in teams]
+  if not items:raise PlatformError('at least one reviewer is required')
+  if any(not x or len(x)>256 for _,x in items):raise PlatformError('invalid reviewer subject')
+  now=int(time.time())
+  for kind,subject in items:self.db.execute("INSERT INTO proposal_reviewers(proposal_id,subject_kind,subject,state,requested_by,requested_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(proposal_id,subject_kind,subject) DO UPDATE SET state='requested',requested_by=excluded.requested_by,requested_at=excluded.requested_at,updated_at=excluded.updated_at",(pid,kind,subject,'requested',actor,now,now))
+  self.db.commit();self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+ def remove_requested_reviewers(self,pid,actor,principals=(),teams=()):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  items=[('principal',x) for x in principals]+[('team',x) for x in teams]
+  if not items:raise PlatformError('at least one reviewer is required')
+  now=int(time.time())
+  for kind,subject in items:self.db.execute("UPDATE proposal_reviewers SET state='removed',updated_at=? WHERE proposal_id=? AND subject_kind=? AND subject=?",(now,pid,kind,subject))
+  self.db.commit();self.emit('review.request.removed',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+ def list_requested_reviewers(self,pid,state=None):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  if state is None:rows=self.db.execute('SELECT * FROM proposal_reviewers WHERE proposal_id=? ORDER BY subject_kind,subject',(pid,))
+  else:
+   if state not in ('requested','fulfilled','removed'):raise PlatformError('invalid reviewer request state')
+   rows=self.db.execute('SELECT * FROM proposal_reviewers WHERE proposal_id=? AND state=? ORDER BY subject_kind,subject',(pid,state))
+  return [dict(x) for x in rows]
+ def add_review(self,pid,reviewer,state,body='',reviewer_teams=()):
   if state not in ('approved','changes_requested','commented'):raise PlatformError('invalid review state')
   p=self.db.execute('SELECT repo,source_revision FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
-  self.db.execute('INSERT INTO reviews(proposal_id,reviewer,state,body,created_at,source_revision) VALUES(?,?,?,?,?,?)',(pid,reviewer,state,body,int(time.time()),p['source_revision']));self.db.commit();self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+  now=int(time.time());self.db.execute('INSERT INTO reviews(proposal_id,reviewer,state,body,created_at,source_revision) VALUES(?,?,?,?,?,?)',(pid,reviewer,state,body,now,p['source_revision']));cur=self.db.execute("UPDATE proposal_reviewers SET state='fulfilled',updated_at=? WHERE proposal_id=? AND subject_kind='principal' AND subject=? AND state='requested'",(now,pid,reviewer));team_count=0
+  for team in reviewer_teams:team_count+=self.db.execute("UPDATE proposal_reviewers SET state='fulfilled',updated_at=? WHERE proposal_id=? AND subject_kind='team' AND subject=? AND state='requested'",(now,pid,team)).rowcount
+  self.db.commit();self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+  if cur.rowcount or team_count:self.emit('review.request.fulfilled',p['repo'],reviewer,{'proposal_id':pid,'reviewer':reviewer,'teams':list(reviewer_teams)})
  def create_review_thread(self,pid,revision_id,node_id,path,author,body,line_start=None,line_end=None):
   proposal=self.get_proposal(pid)
   if not proposal:raise PlatformError('proposal not found')

@@ -36,6 +36,7 @@ class SharedControlPlane:
   self.issue_comments_t=Table('cp_issue_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('issue_id',Integer),Column('author',String(256)),Column('body',Text),Column('created_at',Integer))
   self.review_threads=Table('cp_review_threads',self.meta,Column('id',String(64),primary_key=True),Column('proposal_id',String(64),nullable=False),Column('revision_id',String(64),nullable=False),Column('node_id',String(32),nullable=False),Column('path_hex',Text,nullable=False),Column('line_start',Integer),Column('line_end',Integer),Column('state',String(16),nullable=False),Column('author',String(256),nullable=False),Column('created_at',Integer,nullable=False),Column('resolved_by',String(256)),Column('resolved_at',Integer))
   self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
+  self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
@@ -89,6 +90,14 @@ class SQLOrganizationStore:
   return tid
  def list_teams(self,org):
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.teams.c.id,self.cp.teams.c.name).where(self.cp.teams.c.org==org).order_by(self.cp.teams.c.name,self.cp.teams.c.id)).mappings()]
+ def team_ids_for_principal(self,principal,repo=None):
+  with self.cp.engine.connect() as c:
+   q=select(self.cp.team_members.c.team).where(self.cp.team_members.c.principal==principal)
+   if repo is not None:
+    binding=c.execute(select(self.cp.repo_bindings).where(self.cp.repo_bindings.c.repo==repo)).mappings().first()
+    if not binding:return ()
+    q=q.select_from(self.cp.team_members.join(self.cp.teams,self.cp.teams.c.id==self.cp.team_members.c.team)).where(self.cp.teams.c.org==binding['org'])
+   return tuple(x[0] for x in c.execute(q.order_by(self.cp.team_members.c.team)))
  def add_team_member(self,team,principal):
   try:
    with self.cp.engine.begin() as c:c.execute(insert(self.cp.team_members).values(team=team,principal=principal))
@@ -168,13 +177,48 @@ class SQLCollaborationStore:
   if not p:raise PlatformError('proposal not found')
   if p['status']!='open':raise PlatformError('proposal is not open')
   if expected_old is not None and p['source_revision']!=expected_old:raise PlatformError('proposal source advanced')
-  with self.cp.engine.begin() as c:c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(source_revision=source_revision))
-  self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision});return self.get_proposal(pid)
- def add_review(self,pid,reviewer,state,body=''):
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(source_revision=source_revision));res=c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.state=='fulfilled')).values(state='requested',updated_at=now))
+  self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':res.rowcount});return self.get_proposal(pid)
+ def request_reviewers(self,pid,actor,principals=(),teams=()):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  items=[('principal',x) for x in principals]+[('team',x) for x in teams]
+  if not items:raise PlatformError('at least one reviewer is required')
+  if any(not x or len(x)>256 for _,x in items):raise PlatformError('invalid reviewer subject')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   for kind,subject in items:
+    cond=and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind==kind,self.cp.proposal_reviewers.c.subject==subject)
+    if c.execute(select(self.cp.proposal_reviewers.c.proposal_id).where(cond)).first():c.execute(update(self.cp.proposal_reviewers).where(cond).values(state='requested',requested_by=actor,requested_at=now,updated_at=now))
+    else:c.execute(insert(self.cp.proposal_reviewers).values(proposal_id=pid,subject_kind=kind,subject=subject,state='requested',requested_by=actor,requested_at=now,updated_at=now))
+  self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+ def remove_requested_reviewers(self,pid,actor,principals=(),teams=()):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  items=[('principal',x) for x in principals]+[('team',x) for x in teams]
+  if not items:raise PlatformError('at least one reviewer is required')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   for kind,subject in items:c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind==kind,self.cp.proposal_reviewers.c.subject==subject)).values(state='removed',updated_at=now))
+  self.emit('review.request.removed',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+ def list_requested_reviewers(self,pid,state=None):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  cond=self.cp.proposal_reviewers.c.proposal_id==pid
+  if state is not None:
+   if state not in ('requested','fulfilled','removed'):raise PlatformError('invalid reviewer request state')
+   cond=and_(cond,self.cp.proposal_reviewers.c.state==state)
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.proposal_reviewers).where(cond).order_by(self.cp.proposal_reviewers.c.subject_kind,self.cp.proposal_reviewers.c.subject)).mappings()]
+ def add_review(self,pid,reviewer,state,body='',reviewer_teams=()):
   if state not in ('approved','changes_requested','commented'):raise PlatformError('invalid review state')
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
-  with self.cp.engine.begin() as c:c.execute(insert(self.cp.reviews).values(proposal_id=pid,reviewer=reviewer,state=state,body=body,created_at=int(time.time()),source_revision=p['source_revision']))
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   c.execute(insert(self.cp.reviews).values(proposal_id=pid,reviewer=reviewer,state=state,body=body,created_at=now,source_revision=p['source_revision']))
+   c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind=='principal',self.cp.proposal_reviewers.c.subject==reviewer,self.cp.proposal_reviewers.c.state=='requested')).values(state='fulfilled',updated_at=now))
+   for team in reviewer_teams:c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind=='team',self.cp.proposal_reviewers.c.subject==team,self.cp.proposal_reviewers.c.state=='requested')).values(state='fulfilled',updated_at=now))
   self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
  def create_review_thread(self,pid,revision_id,node_id,path,author,body,line_start=None,line_end=None):
   proposal=self.get_proposal(pid)
