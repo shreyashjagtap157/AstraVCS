@@ -1,3 +1,10 @@
+## 0.47.0 - Structured mergeability inspection
+
+- Added a read-only proposal mergeability endpoint that reports draft, target-advance, policy, code-owner, and merge-conflict blockers before mutation.
+- Added non-persisting merge preview mode so mergeability inspection can compute deterministic Conflict IDs without adding Conflict objects to repository storage.
+- Preserved persisted Conflict behavior for actual conflicted-merge workflows.
+- Added typed web-client mergeability support and regression coverage proving inspection has no repository-object side effects.
+
 ## 0.46.0 - Deterministic review decision policy
 
 - Made latest-review policy evaluation deterministic with explicit `(created_at,id)` ordering in local and shared SQL stores.

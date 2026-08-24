@@ -57,13 +57,15 @@ def _merge_text(base,left,right):
 
 class MergeEngine:
     def __init__(self,repo:AstraRepository):self.repo=repo
-    def preview(self,left:str,right:str)->MergePreview:
+    def preview(self,left:str,right:str,*,persist_conflicts=True)->MergePreview:
         base=merge_base(self.repo,left,right)
         br=self.repo.get(ObjectType.REVISION,base);lr=self.repo.get(ObjectType.REVISION,left);rr=self.repo.get(ObjectType.REVISION,right)
         bt=self.repo.get(ObjectType.TREE,br.tree_id);lt=self.repo.get(ObjectType.TREE,lr.tree_id);rt=self.repo.get(ObjectType.TREE,rr.tree_id)
         B,L,R=_by_node(bt),_by_node(lt),_by_node(rt); result={}; conflict_ids=[]
         def conflict(kind,node):
-            c=Conflict(kind.encode(),(lt.tree_id,rt.tree_id),(node,));self.repo.put(c);conflict_ids.append(c.conflict_id)
+            c=Conflict(kind.encode(),(lt.tree_id,rt.tree_id),(node,))
+            if persist_conflicts:self.repo.put(c)
+            conflict_ids.append(c.conflict_id)
         # Existing base nodes.
         for node,b in B.items():
             l=L.get(node);r=R.get(node)

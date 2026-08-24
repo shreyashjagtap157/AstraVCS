@@ -1,6 +1,7 @@
 export interface RefRecord { refs: [string,string][]; operation_head: string|null }
 export interface RepositoryList { repositories: string[] }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number; draft:number|boolean }
+export interface Mergeability { mergeable:boolean; blockers:Array<{type:string;message:string;[key:string]:unknown}>; proposal_id?:string; source_revision?:string; current_target?:string|null; expected_target?:string|null }
 export interface ReviewThread { id:string; proposal_id:string; revision_id:string; node_id:string; path_hex:string; line_start:number|null; line_end:number|null; state:'open'|'resolved'; author:string; created_at:number; resolved_by:string|null; resolved_at:number|null; comments?:ReviewThreadComment[]; outdated?:boolean }
 export interface ReviewThreadComment { id:number; thread_id:string; author:string; body:string; created_at:number }
 
@@ -29,6 +30,7 @@ export class AstraApi {
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}
+  mergeability(repo:string,proposalId:string):Promise<Mergeability>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/mergeability`)}
   ownershipRules(repo:string):Promise<{owners:Array<{repo:string;pattern:string;subject_kind:'principal'|'team';subject:string;priority:number}>}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/owners`)}
   setOwnershipRule(repo:string,rule:{pattern:string;subject_kind:'principal'|'team';subject:string;priority?:number},action:'upsert'|'delete'='upsert'):Promise<{owners:unknown[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/owners`,{method:'POST',body:JSON.stringify({...rule,action})})}
   recommendedReviewers(repo:string,proposalId:string):Promise<{paths_hex:string[];reviewers:string[];teams:string[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/recommended-reviewers`)}

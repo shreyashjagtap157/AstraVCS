@@ -86,6 +86,25 @@ class AstraServer:
       if kind=='team' and any(subject in team_cache.get(reviewer,set()) for reviewer in approved):ok=True;break
      if not ok:missing.append(path)
     if missing:raise ValueError('code-owner approval missing for '+','.join(x.hex() for x in missing))
+   def _proposal_mergeability(self,name,pid):
+    proposal=outer.platform.get_proposal(pid)
+    if not proposal or proposal['repo']!=name:return {'mergeable':False,'blockers':[{'type':'proposal_not_found','message':'proposal not found'}]}
+    blockers=[];repo=outer.registry.open(name);ref=proposal['target_ref'].encode();current=dict(repo.current_view().refs).get(ref)
+    if proposal['status']!='open':blockers.append({'type':'proposal_closed','message':'proposal is not open'})
+    if proposal.get('draft'):blockers.append({'type':'draft','message':'proposal is draft'})
+    if current!=proposal.get('target_revision'):blockers.append({'type':'target_advanced','message':'proposal target advanced','current_target':current,'expected_target':proposal.get('target_revision')})
+    policy=outer.policy.policy_for(ref)
+    if policy:
+     try:outer.platform.require_policy(pid,policy)
+     except Exception as exc:blockers.append({'type':'policy','message':str(exc)})
+     try:self._require_code_owner_reviews(name,pid,policy)
+     except Exception as exc:blockers.append({'type':'code_owner','message':str(exc)})
+    conflicts=[]
+    if current is not None and proposal['source_revision']!=current:
+     try:conflicts=list(MergeEngine(repo).preview(current,proposal['source_revision'],persist_conflicts=False).conflicts)
+     except Exception as exc:blockers.append({'type':'merge_preview','message':str(exc)})
+     if conflicts:blockers.append({'type':'merge_conflicts','message':f'merge has {len(conflicts)} unresolved conflicts','conflicts':conflicts})
+    return {'mergeable':not blockers,'blockers':blockers,'proposal_id':pid,'source_revision':proposal['source_revision'],'current_target':current,'expected_target':proposal.get('target_revision')}
    def do_GET(self):
     try:
      p=self._parts()
@@ -125,6 +144,8 @@ class AstraServer:
        self._require('repo.read',name);return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if len(p)==6 and p[3]=='proposals' and p[5]=='recommended-reviewers':
        self._require('proposals.read',name);paths=self._proposal_changed_paths(name,p[4]);owners=outer.identity.owners_for_paths(name,paths);return self._json(200,{'paths_hex':[x.hex() for x in paths],'reviewers':[s for k,s in owners if k=='principal'],'teams':[s for k,s in owners if k=='team']})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='mergeability':
+       self._require('proposals.read',name);return self._json(200,self._proposal_mergeability(name,p[4]))
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviewers':
        self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
