@@ -155,6 +155,8 @@ class AstraServer:
        self._require('repo.read',name);return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if p[3:]==['proposals']:
        self._require('proposals.read',name);q=parse_qs(urlparse(self.path).query);status=q.get('status',['open'])[0];limit=self._page_limit(q);created,cursor_id=self._proposal_cursor(q.get('cursor',[''])[0]);rows=outer.platform.list_proposals_page(name,status,created,cursor_id,limit);return self._json(200,{'proposals':rows,'next_cursor':self._encode_proposal_cursor(rows[-1]) if len(rows)==limit else None})
+      if p[3:]==['merge-queue']:
+       self._require('proposals.read',name);q=parse_qs(urlparse(self.path).query);target=q.get('target_ref',[None])[0];state=q.get('state',['queued'])[0];return self._json(200,{'entries':outer.platform.list_merge_queue(name,target,state)})
       if len(p)==6 and p[3]=='proposals' and p[5]=='recommended-reviewers':
        self._require('proposals.read',name);paths=self._proposal_changed_paths(name,p[4]);owners=outer.identity.owners_for_paths(name,paths);return self._json(200,{'paths_hex':[x.hex() for x in paths],'reviewers':[s for k,s in owners if k=='principal'],'teams':[s for k,s in owners if k=='team']})
       if len(p)==6 and p[3]=='proposals' and p[5]=='mergeability':
@@ -340,6 +342,30 @@ class AstraServer:
        self._require('checks.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
        outer.platform.set_check(p[4],body['name'],body['status'],body.get('conclusion'),body.get('details',''));return self._json(200,{'ok':True})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='enqueue':
+       principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       if not self._proposal_mergeability(name,p[4])['mergeable']:raise ValueError('proposal is not currently mergeable')
+       return self._json(201,{'entry':outer.platform.enqueue_merge(p[4],principal.principal_id)})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='dequeue':
+       principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       return self._json(200,{'entry':outer.platform.cancel_merge(p[4],principal.principal_id)})
+      if p[3:]==['merge-queue','process']:
+       principal=self._require('proposals.merge',name);target_ref=body['target_ref'];head=outer.platform.merge_queue_head(name,target_ref)
+       if not head:return self._json(200,{'processed':False})
+       proposal=outer.platform.get_proposal(head['proposal_id'])
+       if not proposal or proposal['repo']!=name or proposal['status']!='open' or proposal['source_revision']!=head['source_revision']:
+        outer.platform.cancel_merge(head['proposal_id'],principal.principal_id,'stale');return self._json(409,{'error':'merge_queue_entry_stale','proposal_id':head['proposal_id']})
+       if proposal.get('draft'):raise ValueError('draft proposal cannot be merged')
+       ref=target_ref.encode()
+       if proposal['target_ref']!=target_ref:raise ValueError('merge queue target mismatch')
+       self._require(outer.policy.required_capability(ref),name);policy=outer.policy.policy_for(ref)
+       if policy:outer.platform.require_policy(proposal['id'],policy);self._require_code_owner_reviews(name,proposal['id'],policy)
+       repo=outer.registry.open(name);view=repo.current_view();refs=dict(view.refs);current=refs.get(ref)
+       if current is None:merged=proposal['source_revision']
+       else:merged=MergeEngine(repo).create_merge_revision(current,proposal['source_revision'])
+       refs[ref]=merged;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'merge-queue',expected_head=repo.operation_head());outer.platform.close_proposal(proposal['id'],principal.principal_id,'merged');outer.platform.cancel_merge(proposal['id'],principal.principal_id,'merged');return self._json(200,{'processed':True,'proposal_id':proposal['id'],'revision':merged})
       if len(p)==6 and p[3]=='proposals' and p[5]=='merge':
        principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')

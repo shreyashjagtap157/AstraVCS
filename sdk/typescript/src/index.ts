@@ -3,6 +3,7 @@ export interface RepositoryList { repositories: string[] }
 export interface CompatibilityDescriptor { product_version:string; api_versions:number[]; repository_formats:number[]; bundle_formats:number[]; semantic_schemas:number[]; sync_protocol_versions:number[] }
 export interface ReviewEvidence { id:number; proposal_id:string; reviewer:string; state:'approved'|'changes_requested'|'commented'; body:string; created_at:number; source_revision:string }
 export interface CheckEvidence { id:number; proposal_id:string; name:string; status:string; conclusion:string|null; details:string; updated_at:number; source_revision:string }
+export interface MergeQueueEntry { id:number; repo:string; target_ref:string; proposal_id:string; source_revision:string; state:'queued'|'merged'|'cancelled'|'stale'; enqueued_by:string; enqueued_at:number; updated_at:number }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
 export interface Issue { id:number; repo:string; title:string; body:string; state:string; created_by:string; created_at:number; updated_at:number }
 export interface IssueComment { id:number; issue_id:number; author:string; body:string; created_at:number }
@@ -33,6 +34,10 @@ export class AstraApi {
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string,limit=100,cursor?:string,status='open'):Promise<{proposals:Proposal[];next_cursor:string|null}>{const q=new URLSearchParams({limit:String(limit),status});if(cursor)q.set('cursor',cursor);return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals?${q}`)}
   proposalEvidence(repo:string,proposalId:string,scope:'current'|'all'='current'):Promise<{proposal_id:string;source_revision:string;scope:string;reviews:ReviewEvidence[];checks:CheckEvidence[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/evidence?scope=${scope}`)}
+  mergeQueue(repo:string,targetRef?:string,state='queued'):Promise<{entries:MergeQueueEntry[]}>{const q=new URLSearchParams({state});if(targetRef)q.set('target_ref',targetRef);return this.request(`/v1/repos/${encodeURIComponent(repo)}/merge-queue?${q}`)}
+  enqueueProposal(repo:string,proposalId:string):Promise<{entry:MergeQueueEntry}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/enqueue`,{method:'POST',body:'{}'})}
+  dequeueProposal(repo:string,proposalId:string):Promise<{entry:MergeQueueEntry}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/dequeue`,{method:'POST',body:'{}'})}
+  processMergeQueue(repo:string,targetRef:string):Promise<{processed:boolean;proposal_id?:string;revision?:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/merge-queue/process`,{method:'POST',body:JSON.stringify({target_ref:targetRef})})}
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
   createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}

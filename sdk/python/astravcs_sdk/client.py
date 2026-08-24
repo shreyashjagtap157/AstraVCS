@@ -29,3 +29,12 @@ class AstraClient:
  def proposal_evidence(self,repo,proposal_id,scope='current'):
   if scope not in ('current','all'):raise ValueError('scope must be current or all')
   return self._request('GET',f'/v1/repos/{repo}/proposals/{proposal_id}/evidence?scope={scope}')
+
+ def merge_queue(self,repo,target_ref=None,state='queued'):
+  from urllib.parse import urlencode
+  q={'state':state}
+  if target_ref:q['target_ref']=target_ref
+  return self._request('GET',f'/v1/repos/{repo}/merge-queue?'+urlencode(q))['entries']
+ def enqueue_proposal(self,repo,proposal_id):return self._request('POST',f'/v1/repos/{repo}/proposals/{proposal_id}/enqueue',{})['entry']
+ def dequeue_proposal(self,repo,proposal_id):return self._request('POST',f'/v1/repos/{repo}/proposals/{proposal_id}/dequeue',{})['entry']
+ def process_merge_queue(self,repo,target_ref):return self._request('POST',f'/v1/repos/{repo}/merge-queue/process',{'target_ref':target_ref})

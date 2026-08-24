@@ -20,6 +20,8 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(proposal_id,subject_kind,subject));
+  CREATE TABLE IF NOT EXISTS merge_queue(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT NOT NULL,target_ref TEXT NOT NULL,proposal_id TEXT NOT NULL UNIQUE,source_revision TEXT NOT NULL,state TEXT NOT NULL,enqueued_by TEXT NOT NULL,enqueued_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS merge_queue_order ON merge_queue(repo,target_ref,state,id);
   ''')
   proposal_cols={r['name'] for r in self.db.execute('PRAGMA table_info(proposals)')}
   if 'draft' not in proposal_cols:self.db.execute('ALTER TABLE proposals ADD COLUMN draft INTEGER NOT NULL DEFAULT 0')
@@ -161,6 +163,31 @@ class CollaborationStore:
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
   self.db.execute('UPDATE proposals SET status=? WHERE id=?',(state,pid));self.db.commit();self.emit('proposal.'+state,p['repo'],actor,{'proposal_id':pid})
+
+
+ def enqueue_merge(self,pid,actor):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  if p['status']!='open':raise PlatformError('proposal is not open')
+  if p.get('draft'):raise PlatformError('draft proposal cannot enter merge queue')
+  now=int(time.time())
+  try:self.db.execute("INSERT INTO merge_queue(repo,target_ref,proposal_id,source_revision,state,enqueued_by,enqueued_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",(p['repo'],p['target_ref'],pid,p['source_revision'],'queued',actor,now,now));self.db.commit()
+  except sqlite3.IntegrityError as exc:self.db.rollback();raise PlatformError('proposal is already queued') from exc
+  self.emit('merge_queue.enqueued',p['repo'],actor,{'proposal_id':pid,'source_revision':p['source_revision'],'target_ref':p['target_ref']});return self.merge_queue_entry(pid)
+ def merge_queue_entry(self,pid):
+  r=self.db.execute('SELECT * FROM merge_queue WHERE proposal_id=?',(pid,)).fetchone();return None if r is None else dict(r)
+ def list_merge_queue(self,repo,target_ref=None,state='queued'):
+  if state not in ('queued','merged','cancelled','stale'):raise PlatformError('invalid merge queue state')
+  if target_ref is None:rows=self.db.execute('SELECT * FROM merge_queue WHERE repo=? AND state=? ORDER BY id',(repo,state))
+  else:rows=self.db.execute('SELECT * FROM merge_queue WHERE repo=? AND target_ref=? AND state=? ORDER BY id',(repo,target_ref,state))
+  return [dict(x) for x in rows]
+ def cancel_merge(self,pid,actor,state='cancelled'):
+  if state not in ('cancelled','stale','merged'):raise PlatformError('invalid merge queue terminal state')
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='queued':raise PlatformError('proposal is not queued')
+  self.db.execute('UPDATE merge_queue SET state=?,updated_at=? WHERE proposal_id=? AND state=?',(state,int(time.time()),pid,'queued'));self.db.commit();self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
+ def merge_queue_head(self,repo,target_ref):
+  r=self.db.execute("SELECT * FROM merge_queue WHERE repo=? AND target_ref=? AND state='queued' ORDER BY id LIMIT 1",(repo,target_ref)).fetchone();return None if r is None else dict(r)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')

@@ -38,6 +38,7 @@ class SharedControlPlane:
   self.review_threads=Table('cp_review_threads',self.meta,Column('id',String(64),primary_key=True),Column('proposal_id',String(64),nullable=False),Column('revision_id',String(64),nullable=False),Column('node_id',String(32),nullable=False),Column('path_hex',Text,nullable=False),Column('line_start',Integer),Column('line_end',Integer),Column('state',String(16),nullable=False),Column('author',String(256),nullable=False),Column('created_at',Integer,nullable=False),Column('resolved_by',String(256)),Column('resolved_at',Integer))
   self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
   self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
+  self.merge_queue=Table('cp_merge_queue',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256),nullable=False),Column('target_ref',Text,nullable=False),Column('proposal_id',String(64),nullable=False,unique=True),Column('source_revision',String(64),nullable=False),Column('state',String(16),nullable=False),Column('enqueued_by',String(256),nullable=False),Column('enqueued_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
@@ -347,6 +348,34 @@ class SQLCollaborationStore:
   if not p:raise PlatformError('proposal not found')
   with self.cp.engine.begin() as c:c.execute(update(self.cp.proposals).where(self.cp.proposals.c.id==pid).values(status=state))
   self.emit('proposal.'+state,p['repo'],actor,{'proposal_id':pid})
+
+
+ def enqueue_merge(self,pid,actor):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  if p['status']!='open':raise PlatformError('proposal is not open')
+  if p.get('draft'):raise PlatformError('draft proposal cannot enter merge queue')
+  now=int(time.time())
+  try:
+   with self.cp.engine.begin() as c:c.execute(insert(self.cp.merge_queue).values(repo=p['repo'],target_ref=p['target_ref'],proposal_id=pid,source_revision=p['source_revision'],state='queued',enqueued_by=actor,enqueued_at=now,updated_at=now))
+  except IntegrityError as exc:raise PlatformError('proposal is already queued') from exc
+  self.emit('merge_queue.enqueued',p['repo'],actor,{'proposal_id':pid,'source_revision':p['source_revision'],'target_ref':p['target_ref']});return self.merge_queue_entry(pid)
+ def merge_queue_entry(self,pid):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(self.cp.merge_queue.c.proposal_id==pid)).mappings().first();return None if r is None else dict(r)
+ def list_merge_queue(self,repo,target_ref=None,state='queued'):
+  if state not in ('queued','merged','cancelled','stale'):raise PlatformError('invalid merge queue state')
+  cond=and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.state==state)
+  if target_ref is not None:cond=and_(cond,self.cp.merge_queue.c.target_ref==target_ref)
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.merge_queue).where(cond).order_by(self.cp.merge_queue.c.id)).mappings()]
+ def cancel_merge(self,pid,actor,state='cancelled'):
+  if state not in ('cancelled','stale','merged'):raise PlatformError('invalid merge queue terminal state')
+  row=self.merge_queue_entry(pid)
+  if not row or row['state']!='queued':raise PlatformError('proposal is not queued')
+  with self.cp.engine.begin() as c:r=c.execute(update(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.proposal_id==pid,self.cp.merge_queue.c.state=='queued')).values(state=state,updated_at=int(time.time())))
+  if r.rowcount!=1:raise PlatformError('proposal is not queued')
+  self.emit('merge_queue.'+state,row['repo'],actor,{'proposal_id':pid,'target_ref':row['target_ref']});return self.merge_queue_entry(pid)
+ def merge_queue_head(self,repo,target_ref):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.merge_queue).where(and_(self.cp.merge_queue.c.repo==repo,self.cp.merge_queue.c.target_ref==target_ref,self.cp.merge_queue.c.state=='queued')).order_by(self.cp.merge_queue.c.id).limit(1)).mappings().first();return None if r is None else dict(r)
 
  def create_issue(self,repo,title,body,actor):
   if not title or len(title)>4096:raise PlatformError('invalid issue title')

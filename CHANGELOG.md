@@ -1,3 +1,11 @@
+## 0.52.0 - Protected merge queue
+
+- Added first-class durable merge queues for protected proposal integration, kept strictly in collaboration metadata.
+- Added head-only serialized queue processing with source-Revision pinning, stale-entry rejection, policy/code-owner revalidation, and canonical Operation-CAS publication.
+- Added local SQLite and dialect-neutral shared-SQL queue persistence with cross-node visibility and typed lifecycle events.
+- Added capability-gated queue HTTP APIs plus Python, TypeScript SDK, and web-client surfaces.
+- Added regression coverage for authorization, enqueue/process lifecycle, stale source refreshes, and shared-SQL HA visibility.
+
 ## 0.51.0 - Revision-scoped evidence hardening
 
 - Fixed check-evidence retention so a check result on a refreshed proposal source no longer overwrites evidence produced for an older RevisionID.
