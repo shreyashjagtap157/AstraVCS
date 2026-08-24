@@ -22,6 +22,7 @@ from astra_protocol import CURRENT_COMPATIBILITY
 from astra_plugins import PluginRegistry,PluginManifest
 from astra_policy_store import SQLRefPolicyStore
 from astra_automation import PluginCatalog
+from astra_identity import OrganizationStore
 
 _NAME=re.compile(r'^[A-Za-z0-9._-]{1,128}$')
 class RepositoryRegistry:
@@ -34,11 +35,11 @@ class RepositoryRegistry:
  def list(self):return sorted(p.name for p in self.root.iterdir() if (p/'.astra').is_dir())
 
 class AstraServer:
- def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,policy_store=None,worker_id=None):
+ def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,policy_store=None,identity=None,worker_id=None):
   self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
   self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=workspaces or WorkspaceManifestStore(self.root/'workspaces');self.packages=packages or PackageRegistry(self.root/'packages');self.agent_jobs=agent_jobs or AgentJobStore(self.root/'agents.sqlite')
-  self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
-  self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self._owns_policy=policy_store is None;self.policy=policy_store or SQLRefPolicyStore('sqlite:///'+str((self.root/'policies.sqlite').resolve()));self.policy.seed(policies or [RefPolicy()]) if hasattr(self.policy,'seed') else None;self.http=None;self.thread=None
+  self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.identity=identity or OrganizationStore(self.root/'identity.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
+  self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self._owns_identity=identity is None;self._owns_policy=policy_store is None;self.policy=policy_store or SQLRefPolicyStore('sqlite:///'+str((self.root/'policies.sqlite').resolve()));self.policy.seed(policies or [RefPolicy()]) if hasattr(self.policy,'seed') else None;self.http=None;self.thread=None
  def run_agent_job(self,jid,runtime,*,target_ref='refs/heads/main',production=True):
   return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production,worker_id=self.worker_id)
  def serve(self,host='127.0.0.1',port=0):
@@ -56,7 +57,13 @@ class AstraServer:
     v=self.headers.get('Authorization','')
     if not v.startswith('Bearer '):raise AuthenticationError('missing bearer token')
     return v[7:]
-   def _require(self,cap,res='*'):return outer.tokens.require(self._token(),cap,res)
+   def _require(self,cap,res='*'):
+    token=self._token()
+    try:return outer.tokens.require(token,cap,res)
+    except AuthorizationError:
+     principal,_=outer.tokens.authenticate(token)
+     if res!='*' and any((g.capability==cap or g.capability=='*') and g.resource==res for g in outer.identity.grants_for(principal.principal_id,res)):return principal
+     raise
    def _parts(self):return [x for x in urlparse(self.path).path.split('/') if x]
    def do_GET(self):
     try:
@@ -65,6 +72,12 @@ class AstraServer:
      if p==['v1','capabilities']:return self._json(200,{'product_version':product_version(),**CURRENT_COMPATIBILITY.canonical()})
      if p==['v1','repos']:
       self._require('repos.list');return self._json(200,{'repositories':outer.registry.list()})
+     if p==['v1','orgs']:
+      self._require('orgs.read');return self._json(200,{'organizations':outer.identity.list_orgs()})
+     if len(p)==4 and p[:2]==['v1','orgs'] and p[3]=='members':
+      self._require('orgs.read',p[2]);return self._json(200,{'members':outer.identity.list_members(p[2])})
+     if len(p)==4 and p[:2]==['v1','orgs'] and p[3]=='teams':
+      self._require('orgs.read',p[2]);return self._json(200,{'teams':outer.identity.list_teams(p[2])})
      if p==['v1','plugins']:
       self._require('plugins.read');return self._json(200,{'plugins':outer.plugins.list()})
      if p==['v1','plugin-catalog']:
@@ -85,6 +98,8 @@ class AstraServer:
        self._require('issues.read',name);issue=outer.platform.get_issue(int(p[4]))
        if not issue or issue['repo']!=name:return self._json(404,{'error':'issue_not_found'})
        return self._json(200,{'issue':issue,'comments':outer.platform.issue_comments(int(p[4]))})
+      if p[3:]==['organization']:
+       self._require('orgs.read');return self._json(200,{'binding':outer.identity.repo_binding(name)})
       self._require('repo.read',name);repo=outer.registry.open(name)
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
@@ -126,6 +141,14 @@ class AstraServer:
    def do_POST(self):
     try:
      p=self._parts();is_binary=(len(p)>=4 and p[:2]==['v1','repos'] and p[3:]==['bundle']) or (len(p)==6 and p[:2]==['v1','packages']);body=None if is_binary else self._body()
+     if p==['v1','orgs']:
+      principal=self._require('orgs.write');org=outer.identity.create_org(body['name']);outer.platform.emit('organization.created',None,principal.principal_id,{'org_id':org.org_id,'name':org.name});return self._json(201,{'id':org.org_id,'name':org.name})
+     if len(p)==4 and p[:2]==['v1','orgs'] and p[3]=='members':
+      principal=self._require('orgs.write',p[2]);outer.identity.add_member(p[2],body['principal'],body.get('role','read'));outer.platform.emit('organization.member.updated',None,principal.principal_id,{'org_id':p[2],'member':body['principal'],'role':body.get('role','read')});return self._json(200,{'ok':True})
+     if len(p)==4 and p[:2]==['v1','orgs'] and p[3]=='teams':
+      principal=self._require('orgs.write',p[2]);tid=outer.identity.create_team(p[2],body['name']);outer.platform.emit('team.created',None,principal.principal_id,{'org_id':p[2],'team_id':tid});return self._json(201,{'id':tid})
+     if len(p)==4 and p[:2]==['v1','teams'] and p[3]=='members':
+      principal=self._require('orgs.write');outer.identity.add_team_member(p[2],body['principal']);outer.platform.emit('team.member.added',None,principal.principal_id,{'team_id':p[2],'member':body['principal']});return self._json(200,{'ok':True})
      if p==['v1','repos']:
       principal=self._require('repos.create');name=body['name'];outer.registry.create(name);outer.platform.emit('repository.created',name,principal.principal_id,{});return self._json(201,{'name':name})
      if len(p)==6 and p[:2]==['v1','packages']:
@@ -154,6 +177,10 @@ class AstraServer:
       self._require('workspaces.write');entries=tuple(WorkspaceEntry(x['name'],x['repository'],x['revision'],x['mount']) for x in body['entries']);m=WorkspaceManifest(body['name'],entries);outer.workspaces.verify(m,outer.registry);oid=outer.workspaces.put(m);return self._json(201,{'id':oid})
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2];repo=outer.registry.open(name)
+      if p[3:]==['organization']:
+       principal=self._require('orgs.write');outer.identity.bind_repo(name,body['org'],body.get('visibility','private'));outer.platform.emit('repository.organization.bound',name,principal.principal_id,{'org_id':body['org'],'visibility':body.get('visibility','private')});return self._json(200,{'ok':True})
+      if p[3:]==['roles']:
+       principal=self._require('orgs.write');outer.identity.set_repo_role(name,body['subject_kind'],body['subject'],body['role']);outer.platform.emit('repository.role.updated',name,principal.principal_id,{'subject_kind':body['subject_kind'],'subject':body['subject'],'role':body['role']});return self._json(200,{'ok':True})
       if p[3:]==['agents']:
        principal=self._require('agents.start',name);input_revision=body['input_revision'];repo.get(ObjectType.REVISION,input_revision);caps=tuple(body.get('capabilities',('changes.create','proposals.create')))
        for cap in caps:self._require(cap,name)
@@ -209,4 +236,5 @@ class AstraServer:
   if self._owns_packages:self.packages.close()
   if self._owns_agent_jobs:self.agent_jobs.close()
   if self._owns_plugins:self.plugins.close()
+  if self._owns_identity:self.identity.close()
   if self._owns_policy and hasattr(self.policy,'close'):self.policy.close()

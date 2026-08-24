@@ -4,11 +4,11 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.35.0` — signed immutable Release Set milestone.
+`v0.36.0` — hosted organizations and role-derived authorization milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-`v0.35.0` adds signed immutable Release Sets over the hardened Repository/Bundle/Semantic-Bundle compatibility contracts while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
+`v0.36.0` makes organizations/teams/repository roles a shared hosted authorization source using the same capability model as tokens/plugins/agents while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
 
 The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 

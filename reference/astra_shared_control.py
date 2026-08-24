@@ -19,6 +19,7 @@ from astra_workspace_manifest import WorkspaceManifest,WorkspaceEntry,WorkspaceM
 from astra_model import validate_object_id
 from astra_policy_store import SQLRefPolicyStore
 from astra_plugins import SQLPluginRegistry
+from astra_identity import ROLE_CAPABILITIES,Organization,IdentityError
 
 class SharedControlError(RuntimeError):pass
 
@@ -36,9 +37,86 @@ class SharedControlPlane:
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
+  self.orgs=Table('cp_organizations',self.meta,Column('id',String(64),primary_key=True),Column('name',String(128),unique=True,nullable=False))
+  self.org_members=Table('cp_org_members',self.meta,Column('org',String(64),primary_key=True),Column('principal',String(256),primary_key=True),Column('role',String(32),nullable=False))
+  self.teams=Table('cp_teams',self.meta,Column('id',String(64),primary_key=True),Column('org',String(64),nullable=False),Column('name',String(128),nullable=False),UniqueConstraint('org','name',name='uq_cp_team'))
+  self.team_members=Table('cp_team_members',self.meta,Column('team',String(64),primary_key=True),Column('principal',String(256),primary_key=True))
+  self.repo_bindings=Table('cp_repo_bindings',self.meta,Column('repo',String(256),primary_key=True),Column('org',String(64),nullable=False),Column('visibility',String(32),nullable=False))
+  self.repo_roles=Table('cp_repo_roles',self.meta,Column('repo',String(256),primary_key=True),Column('subject_kind',String(32),primary_key=True),Column('subject',String(256),primary_key=True),Column('role',String(32),nullable=False))
   self.meta.create_all(self.engine)
-  self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self);self.policy_store=SQLRefPolicyStore(url,engine=self.engine);self.policy_store.seed([__import__('astra_security').RefPolicy()]);self.plugin_store=SQLPluginRegistry(self.engine)
+  self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self);self.identity_store=SQLOrganizationStore(self);self.policy_store=SQLRefPolicyStore(url,engine=self.engine);self.policy_store.seed([__import__('astra_security').RefPolicy()]);self.plugin_store=SQLPluginRegistry(self.engine)
  def close(self):self.engine.dispose()
+
+class SQLOrganizationStore:
+ def __init__(self,cp):self.cp=cp
+ def close(self):pass
+ def create_org(self,name):
+  if not name or len(name)>128:raise IdentityError('invalid organization name')
+  oid=str(uuid.uuid4())
+  try:
+   with self.cp.engine.begin() as c:c.execute(insert(self.cp.orgs).values(id=oid,name=name))
+  except IntegrityError as exc:raise IdentityError('organization already exists') from exc
+  return Organization(oid,name)
+ def list_orgs(self):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.orgs.c.id,self.cp.orgs.c.name).order_by(self.cp.orgs.c.name,self.cp.orgs.c.id)).mappings()]
+ def add_member(self,org,principal,role='read'):
+  if role not in ROLE_CAPABILITIES:raise IdentityError('unknown role')
+  with self.cp.engine.begin() as c:
+   if c.execute(select(self.cp.orgs.c.id).where(self.cp.orgs.c.id==org)).first() is None:raise IdentityError('organization not found')
+   row=c.execute(select(self.cp.org_members.c.org).where(and_(self.cp.org_members.c.org==org,self.cp.org_members.c.principal==principal))).first()
+   if row:c.execute(update(self.cp.org_members).where(and_(self.cp.org_members.c.org==org,self.cp.org_members.c.principal==principal)).values(role=role))
+   else:c.execute(insert(self.cp.org_members).values(org=org,principal=principal,role=role))
+ def list_members(self,org):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.org_members.c.principal,self.cp.org_members.c.role).where(self.cp.org_members.c.org==org).order_by(self.cp.org_members.c.principal)).mappings()]
+ def create_team(self,org,name):
+  if not name or len(name)>128:raise IdentityError('team name required')
+  tid=str(uuid.uuid4())
+  try:
+   with self.cp.engine.begin() as c:
+    if c.execute(select(self.cp.orgs.c.id).where(self.cp.orgs.c.id==org)).first() is None:raise IdentityError('organization not found')
+    c.execute(insert(self.cp.teams).values(id=tid,org=org,name=name))
+  except IntegrityError as exc:raise IdentityError('team already exists') from exc
+  return tid
+ def list_teams(self,org):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.teams.c.id,self.cp.teams.c.name).where(self.cp.teams.c.org==org).order_by(self.cp.teams.c.name,self.cp.teams.c.id)).mappings()]
+ def add_team_member(self,team,principal):
+  try:
+   with self.cp.engine.begin() as c:c.execute(insert(self.cp.team_members).values(team=team,principal=principal))
+  except IntegrityError:pass
+ def bind_repo(self,repo,org,visibility='private'):
+  if visibility not in ('private','internal','public'):raise IdentityError('invalid visibility')
+  with self.cp.engine.begin() as c:
+   if c.execute(select(self.cp.orgs.c.id).where(self.cp.orgs.c.id==org)).first() is None:raise IdentityError('organization not found')
+   row=c.execute(select(self.cp.repo_bindings.c.repo).where(self.cp.repo_bindings.c.repo==repo)).first()
+   if row:c.execute(update(self.cp.repo_bindings).where(self.cp.repo_bindings.c.repo==repo).values(org=org,visibility=visibility))
+   else:c.execute(insert(self.cp.repo_bindings).values(repo=repo,org=org,visibility=visibility))
+ def repo_binding(self,repo):
+  with self.cp.engine.connect() as c:r=c.execute(select(self.cp.repo_bindings).where(self.cp.repo_bindings.c.repo==repo)).mappings().first();return None if r is None else dict(r)
+ def set_repo_role(self,repo,subject_kind,subject,role):
+  if subject_kind not in ('principal','team'):raise IdentityError('invalid role subject')
+  if role not in ROLE_CAPABILITIES:raise IdentityError('unknown role')
+  with self.cp.engine.begin() as c:
+   row=c.execute(select(self.cp.repo_roles.c.repo).where(and_(self.cp.repo_roles.c.repo==repo,self.cp.repo_roles.c.subject_kind==subject_kind,self.cp.repo_roles.c.subject==subject))).first()
+   if row:c.execute(update(self.cp.repo_roles).where(and_(self.cp.repo_roles.c.repo==repo,self.cp.repo_roles.c.subject_kind==subject_kind,self.cp.repo_roles.c.subject==subject)).values(role=role))
+   else:c.execute(insert(self.cp.repo_roles).values(repo=repo,subject_kind=subject_kind,subject=subject,role=role))
+ def effective_role(self,principal,repo):
+  with self.cp.engine.connect() as c:
+   binding=c.execute(select(self.cp.repo_bindings).where(self.cp.repo_bindings.c.repo==repo)).mappings().first()
+   if not binding:return None
+   roles=[]
+   direct=c.execute(select(self.cp.repo_roles.c.role).where(and_(self.cp.repo_roles.c.repo==repo,self.cp.repo_roles.c.subject_kind=='principal',self.cp.repo_roles.c.subject==principal))).first()
+   if direct:roles.append(direct[0])
+   q=select(self.cp.repo_roles.c.role).select_from(self.cp.repo_roles.join(self.cp.team_members,self.cp.team_members.c.team==self.cp.repo_roles.c.subject).join(self.cp.teams,self.cp.teams.c.id==self.cp.repo_roles.c.subject)).where(and_(self.cp.repo_roles.c.repo==repo,self.cp.repo_roles.c.subject_kind=='team',self.cp.team_members.c.principal==principal,self.cp.teams.c.org==binding['org']))
+   roles.extend(r[0] for r in c.execute(q))
+   member=c.execute(select(self.cp.org_members.c.role).where(and_(self.cp.org_members.c.org==binding['org'],self.cp.org_members.c.principal==principal))).first()
+   if member:roles.append(member[0])
+   if binding['visibility']=='public':roles.append('read')
+  if not roles:return None
+  rank={'read':0,'triage':1,'write':2,'maintain':3,'admin':4};return max(roles,key=lambda r:rank[r])
+ def grants_for(self,principal,repo):
+  role=self.effective_role(principal,repo)
+  if role is None:return ()
+  return tuple(Grant(cap,repo) for cap in ROLE_CAPABILITIES[role])
 
 class SQLTokenStore:
  def __init__(self,cp):self.cp=cp

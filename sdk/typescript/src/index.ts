@@ -4,6 +4,9 @@ export interface CompatibilityDescriptor { product_version:string; api_versions:
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
 export interface Issue { id:number; repo:string; title:string; body:string; state:string; created_by:string; created_at:number; updated_at:number }
 export interface IssueComment { id:number; issue_id:number; author:string; body:string; created_at:number }
+export interface Organization { id:string; name:string }
+export interface OrganizationMember { principal:string; role:string }
+export interface Team { id:string; name:string }
 export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
   constructor(private readonly base:string, private token:string) {}
@@ -16,6 +19,14 @@ export class AstraApi {
     if(!response.ok) throw new Error(String(body.error ?? `HTTP ${response.status}`)); return body as T;
   }
   capabilities():Promise<CompatibilityDescriptor>{return this.request('/v1/capabilities')}
+  organizations():Promise<{organizations:Organization[]}>{return this.request('/v1/orgs')}
+  createOrganization(name:string):Promise<Organization>{return this.request('/v1/orgs',{method:'POST',body:JSON.stringify({name})})}
+  organizationMembers(id:string):Promise<{members:OrganizationMember[]}>{return this.request(`/v1/orgs/${encodeURIComponent(id)}/members`)}
+  addOrganizationMember(id:string,principal:string,role='read'):Promise<{ok:boolean}>{return this.request(`/v1/orgs/${encodeURIComponent(id)}/members`,{method:'POST',body:JSON.stringify({principal,role})})}
+  createTeam(org:string,name:string):Promise<{id:string}>{return this.request(`/v1/orgs/${encodeURIComponent(org)}/teams`,{method:'POST',body:JSON.stringify({name})})}
+  addTeamMember(team:string,principal:string):Promise<{ok:boolean}>{return this.request(`/v1/teams/${encodeURIComponent(team)}/members`,{method:'POST',body:JSON.stringify({principal})})}
+  bindRepositoryOrganization(repo:string,org:string,visibility='private'):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/organization`,{method:'POST',body:JSON.stringify({org,visibility})})}
+  setRepositoryRole(repo:string,subjectKind:'principal'|'team',subject:string,role:string):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/roles`,{method:'POST',body:JSON.stringify({subject_kind:subjectKind,subject,role})})}
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}

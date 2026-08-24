@@ -5,5 +5,7 @@ public final class AstraClient { private final String base,token; private final 
  public String get(String path)throws IOException,InterruptedException{var req=HttpRequest.newBuilder(URI.create(base+path)).header("Authorization","Bearer "+token).header("Accept","application/json").GET().build();var r=http.send(req,HttpResponse.BodyHandlers.ofString());if(r.statusCode()/100!=2)throw new IOException("AstraVCS HTTP "+r.statusCode()+": "+r.body());return r.body();}
  public String post(String path,String json)throws IOException,InterruptedException{var req=HttpRequest.newBuilder(URI.create(base+path)).header("Authorization","Bearer "+token).header("Accept","application/json").header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(json)).build();var r=http.send(req,HttpResponse.BodyHandlers.ofString());if(r.statusCode()/100!=2)throw new IOException("AstraVCS HTTP "+r.statusCode()+": "+r.body());return r.body();}
  public String capabilities()throws IOException,InterruptedException{return get("/v1/capabilities");}
+ public String organizations()throws IOException,InterruptedException{return get("/v1/orgs");}
+ public String createOrganization(String json)throws IOException,InterruptedException{return post("/v1/orgs",json);}
  public String agentJob(String id)throws IOException,InterruptedException{return get("/v1/agents/"+id);}
 }

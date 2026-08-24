@@ -67,6 +67,13 @@ func (c *Client) Repositories() ([]string, error) {
 	return x.Repositories, e
 }
 
+type Organization struct { ID string `json:"id"`; Name string `json:"name"` }
+type OrganizationMember struct { Principal string `json:"principal"`; Role string `json:"role"` }
+func (c *Client) Organizations() ([]Organization,error) { var x struct{Organizations []Organization `json:"organizations"`};e:=c.do("GET","/v1/orgs",nil,&x);return x.Organizations,e }
+func (c *Client) CreateOrganization(name string) (Organization,error) { var x Organization;e:=c.do("POST","/v1/orgs",map[string]string{"name":name},&x);return x,e }
+func (c *Client) AddOrganizationMember(org,principal,role string) error { var x map[string]any;return c.do("POST","/v1/orgs/"+org+"/members",map[string]string{"principal":principal,"role":role},&x) }
+func (c *Client) BindRepositoryOrganization(repo,org,visibility string) error { var x map[string]any;return c.do("POST","/v1/repos/"+repo+"/organization",map[string]string{"org":org,"visibility":visibility},&x) }
+
 type AgentJob struct {
 	ID            string  `json:"id"`
 	Repo          string  `json:"repo"`

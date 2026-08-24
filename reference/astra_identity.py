@@ -7,9 +7,9 @@ from astra_security import Grant
 
 class IdentityError(RuntimeError):pass
 ROLE_CAPABILITIES={
- 'read':('repo.read','proposals.read'),
- 'triage':('repo.read','proposals.read','reviews.write'),
- 'write':('repo.read','repo.write','refs.write','proposals.read','proposals.write','reviews.write','checks.write'),
+ 'read':('repo.read','proposals.read','issues.read'),
+ 'triage':('repo.read','proposals.read','issues.read','issues.write','reviews.write'),
+ 'write':('repo.read','repo.write','refs.write','proposals.read','proposals.write','issues.read','issues.write','reviews.write','checks.write','changes.create','proposals.create'),
  'maintain':('repo.read','repo.write','refs.write','proposals.read','proposals.write','proposals.merge','reviews.write','checks.write','plugins.read'),
  'admin':('*',),
 }
@@ -60,6 +60,15 @@ class OrganizationStore:
   if binding['visibility']=='public':roles.append('read')
   if not roles:return None
   rank={'read':0,'triage':1,'write':2,'maintain':3,'admin':4};return max(roles,key=lambda r:rank[r])
+
+ def list_orgs(self):
+  return [dict(x) for x in self.db.execute('SELECT id,name FROM organizations ORDER BY name,id')]
+ def list_members(self,org):
+  return [dict(x) for x in self.db.execute('SELECT principal,role FROM members WHERE org=? ORDER BY principal',(org,))]
+ def list_teams(self,org):
+  return [dict(x) for x in self.db.execute('SELECT id,name FROM teams WHERE org=? ORDER BY name,id',(org,))]
+ def repo_binding(self,repo):
+  r=self.db.execute('SELECT repo,org,visibility FROM repo_bindings WHERE repo=?',(repo,)).fetchone();return None if r is None else dict(r)
  def grants_for(self,principal,repo):
   role=self.effective_role(principal,repo)
   if role is None:return ()

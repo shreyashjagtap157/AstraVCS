@@ -1,3 +1,10 @@
+## 0.36.0 - Hosted organizations and role-derived authorization
+
+- Wired organizations, teams, repository bindings/visibility, direct/team roles, and effective-role grants into the hosted API instead of leaving them as a local-only library.
+- Added role-derived repository authorization through the existing capability vocabulary while keeping global administrative capabilities explicit.
+- Added dialect-neutral shared SQL organization/team/role state for HA and cross-node conformance tests.
+- Propagated organization management through TypeScript, Go, and Java SDK surfaces.
+
 ## 0.35.0 - Signed immutable Release Sets
 
 - Added deterministic Release Set manifests binding version, bootstrap Git commit, Repository Format, compatibility descriptor, and artifact role/name/size/SHA-256.
