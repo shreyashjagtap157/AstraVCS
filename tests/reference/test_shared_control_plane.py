@@ -106,3 +106,19 @@ class SharedPluginPolicyControlTests(unittest.TestCase):
     a.plugin_store.install(PluginManifest('shared.demo','1','remote',('repo.read',),'https://x'),('repo.read',));self.assertEqual(b.plugin_store.installed('shared.demo')['version'],'1')
     a.policy_store.upsert(RefPolicy('refs/heads/release/*','refs.protected.write',2,('ci',)),priority=5);self.assertEqual(b.policy_store.policy_for(b'refs/heads/release/x').required_reviews,2)
    finally:a.close();b.close()
+
+class SharedAgentExecutionDeadlineTests(unittest.TestCase):
+ def test_shared_store_persists_and_enforces_execution_budget(self):
+  import tempfile,time
+  from pathlib import Path
+  from astra_backend import FileBlobBackend
+  from astra_shared_control import SharedControlPlane
+  from astra_agents import AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);url='sqlite:///'+str(root/'cp.db');a=SharedControlPlane(url,FileBlobBackend(root/'blobs'));b=SharedControlPlane(url,FileBlobBackend(root/'blobs'))
+   try:
+    jid=a.agent_store.create(AgentSpec('r','11'*32,'budget',('repo.read',),max_seconds=5));row=b.agent_store.claim(jid,worker_id='w',lease_seconds=60)
+    self.assertEqual(row['max_seconds'],5);self.assertEqual(row['lease_until'],row['deadline_at'])
+    with b.engine.begin() as c:c.execute(__import__('sqlalchemy').text('UPDATE cp_agent_jobs SET lease_until=:t, deadline_at=:t WHERE id=:id'),{'t':int(time.time())-1,'id':jid})
+    with self.assertRaisesRegex(AgentError,'deadline expired'):a.agent_store.heartbeat(jid,'w',claim_generation=row['claim_generation'],lease_seconds=5)
+   finally:a.close();b.close()

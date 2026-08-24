@@ -26,13 +26,14 @@ class AgentJobStore:
  def __init__(self,path):
   self.db=sqlite3.connect(Path(path),check_same_thread=False,timeout=30);self.db.row_factory=sqlite3.Row;self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA busy_timeout=30000');self.db.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,repo TEXT,input_revision TEXT,task TEXT,capabilities TEXT,network_policy TEXT,status TEXT,result TEXT,created INTEGER,updated INTEGER)')
   cols={r[1] for r in self.db.execute('PRAGMA table_info(jobs)')}
-  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0'),('claim_generation','INTEGER NOT NULL DEFAULT 0')):
+  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0'),('claim_generation','INTEGER NOT NULL DEFAULT 0'),('max_seconds','INTEGER NOT NULL DEFAULT 900'),('deadline_at','INTEGER')):
    if name not in cols:self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {decl}')
   self.db.commit()
  def close(self):self.db.close()
  def create(self,spec):
   if spec.network_policy not in ('deny','allowlist','unrestricted'):raise AgentError('invalid network policy')
-  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0));self.db.commit();return jid
+  if not 1<=int(spec.max_seconds)<=86400:raise AgentError('max_seconds must be between 1 and 86400')
+  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation,max_seconds,deadline_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0,int(spec.max_seconds),None));self.db.commit();return jid
  def get(self,jid):
   r=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone();return None if r is None else dict(r)
  def finish(self,jid,status,result,*,worker_id=None,claim_generation=None):
@@ -42,7 +43,7 @@ class AgentJobStore:
    cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND (status!=? OR worker_id IS NULL)',(status,json.dumps(result,sort_keys=True),now,jid,'running'))
   else:
    if claim_generation is None:raise AgentError('claim_generation required for worker-owned finish')
-   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=? AND worker_id=? AND claim_generation=?',(status,json.dumps(result,sort_keys=True),now,jid,'running',worker_id,claim_generation))
+   cur=self.db.execute('UPDATE jobs SET status=?,result=?,updated=?,worker_id=NULL,lease_until=NULL WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>? AND deadline_at>?',(status,json.dumps(result,sort_keys=True),now,jid,'running',worker_id,claim_generation,now,now))
   self.db.commit()
   if cur.rowcount!=1:
    if self.get(jid) is None:raise AgentError('job not found')
@@ -50,14 +51,15 @@ class AgentJobStore:
   return self.get(jid)
  def claim(self,jid,*,worker_id=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
-  worker_id=worker_id or str(uuid.uuid4());now=int(time.time());until=now+int(lease_seconds)
+  worker_id=worker_id or str(uuid.uuid4());now=int(time.time())
   try:
    self.db.execute('BEGIN IMMEDIATE')
-   row=self.db.execute('SELECT status,worker_id,lease_until FROM jobs WHERE id=?',(jid,)).fetchone()
+   row=self.db.execute('SELECT status,worker_id,lease_until,max_seconds FROM jobs WHERE id=?',(jid,)).fetchone()
    if row is None:raise AgentError('job not found')
    reclaim=row['status']=='running' and row['lease_until'] is not None and int(row['lease_until'])<=now
    if row['status']!='queued' and not reclaim:raise AgentError('agent job is not queued or reclaimable')
-   cur=self.db.execute('UPDATE jobs SET status=?,worker_id=?,lease_until=?,attempts=attempts+1,claim_generation=claim_generation+1,updated=? WHERE id=? AND (status=? OR (status=? AND lease_until IS NOT NULL AND lease_until<=?))',('running',worker_id,until,now,jid,'queued','running',now))
+   deadline=now+int(row['max_seconds']);until=min(now+int(lease_seconds),deadline)
+   cur=self.db.execute('UPDATE jobs SET status=?,worker_id=?,lease_until=?,deadline_at=?,attempts=attempts+1,claim_generation=claim_generation+1,updated=? WHERE id=? AND (status=? OR (status=? AND lease_until IS NOT NULL AND lease_until<=?))',('running',worker_id,until,deadline,now,jid,'queued','running',now))
    if cur.rowcount!=1:raise AgentError('agent job claim raced with another worker')
    self.db.commit()
   except Exception:
@@ -67,7 +69,11 @@ class AgentJobStore:
  def heartbeat(self,jid,worker_id,*,claim_generation=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
   if claim_generation is None:raise AgentError('claim_generation required for heartbeat')
-  now=int(time.time());cur=self.db.execute('UPDATE jobs SET lease_until=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>?',(now+int(lease_seconds),now,jid,'running',worker_id,claim_generation,now));self.db.commit()
+  now=int(time.time());row=self.get(jid)
+  if row is None:raise AgentError('job not found')
+  deadline=row.get('deadline_at')
+  if deadline is None or int(deadline)<=now:raise AgentError('agent job execution deadline expired')
+  until=min(now+int(lease_seconds),int(deadline));cur=self.db.execute('UPDATE jobs SET lease_until=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>? AND deadline_at>?',(until,now,jid,'running',worker_id,claim_generation,now,now));self.db.commit()
   if cur.rowcount!=1:
    if self.get(jid) is None:raise AgentError('job not found')
    raise AgentError('agent job lease is expired or not owned by this worker')
@@ -76,7 +82,7 @@ class AgentJobStore:
   row=self.get(jid)
   if not row:raise AgentError('job not found')
   if production and runtime.isolation_level.startswith('development'):raise AgentError('development agent runtime cannot satisfy production isolation')
-  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');claim_generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'])
+  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');claim_generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'],int(row.get('max_seconds') or 900))
   try:result=runtime.execute(spec,workspace)
   except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim_worker,claim_generation=claim_generation)
   if finalize:return self.finish(jid,'completed',result,worker_id=claim_worker,claim_generation=claim_generation)

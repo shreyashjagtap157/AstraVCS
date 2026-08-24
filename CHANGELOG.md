@@ -1,3 +1,10 @@
+## 0.57.0.0 - Bounded agent execution deadlines
+
+- Persisted per-job `max_seconds` execution budgets across local SQLite and shared SQL control planes.
+- Added claim-time execution deadlines and capped worker leases/heartbeats so lease renewal cannot extend a job beyond its configured execution budget.
+- Made worker-owned terminal completion fail closed after lease/deadline expiry, closing the pre-reclamation stale-completion window.
+- Added compatible schema evolution, input validation, and local/cross-node regression coverage for deadline enforcement.
+
 ## 0.56.0.0 - Generation-fenced HA agent execution
 
 - Added monotonically increasing claim generations to durable local and shared-SQL agent jobs.

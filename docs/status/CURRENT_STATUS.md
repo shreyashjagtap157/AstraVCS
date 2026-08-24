@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.56.0.0`
+`v0.57.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.56.0.0` extends generation fencing from protected merge queues to durable agent jobs. Every agent claim now receives a monotonically increasing generation, and heartbeat, intermediate-result persistence, and terminal completion are fenced by both worker identity and generation. A reclaimed execution therefore cannot mutate the current job even when the replacement deliberately reuses the same worker identity. Local SQLite and dialect-neutral shared SQL stores include compatible schema evolution and cross-node regression coverage.
+`v0.57.0.0` adds durable bounded execution deadlines to autonomous-agent jobs. The configured `max_seconds` budget is persisted in both local SQLite and shared SQL stores; each claim establishes a hard execution deadline, lease renewal is capped at that deadline, and worker-owned terminal completion is rejected after lease/deadline expiry. This closes the stale-completion window before another worker has reclaimed an expired job.
 
 ## Validation available in this environment
 

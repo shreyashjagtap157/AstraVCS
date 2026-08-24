@@ -198,3 +198,30 @@ class PluginLifecycleTests(unittest.TestCase):
    self.assertEqual(len(r.list()),1);r.set_enabled('demo',False)
    with self.assertRaises(PluginError):r.require('demo','repo.read')
    r.set_enabled('demo',True);new=r.rotate_secret('demo');self.assertNotEqual(old,new);r.require('demo','repo.read');r.uninstall('demo');self.assertIsNone(r.installed('demo'));r.close()
+
+class AgentExecutionDeadlineTests(unittest.TestCase):
+ def test_claim_persists_budget_and_caps_lease_at_execution_deadline(self):
+  from astra_agents import AgentJobStore,AgentSpec
+  with tempfile.TemporaryDirectory() as td:
+   s=AgentJobStore(Path(td)/'j.db')
+   try:
+    jid=s.create(AgentSpec('r','11'*32,'budgeted',('repo.read',),max_seconds=5));row=s.claim(jid,worker_id='w',lease_seconds=60)
+    self.assertEqual(row['max_seconds'],5);self.assertEqual(row['deadline_at'],row['lease_until']);self.assertLessEqual(row['deadline_at']-int(time.time()),5)
+   finally:s.close()
+ def test_expired_deadline_rejects_heartbeat_and_terminal_completion(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   s=AgentJobStore(Path(td)/'j.db')
+   try:
+    jid=s.create(AgentSpec('r','11'*32,'budgeted',('repo.read',),max_seconds=5));row=s.claim(jid,worker_id='w',lease_seconds=5);g=row['claim_generation']
+    s.db.execute('UPDATE jobs SET lease_until=?,deadline_at=? WHERE id=?',(int(time.time())-1,int(time.time())-1,jid));s.db.commit()
+    with self.assertRaisesRegex(AgentError,'deadline expired'):s.heartbeat(jid,'w',claim_generation=g,lease_seconds=5)
+    with self.assertRaisesRegex(AgentError,'not owned'):s.finish(jid,'completed',{'late':True},worker_id='w',claim_generation=g)
+   finally:s.close()
+ def test_invalid_execution_budget_fails_closed(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   s=AgentJobStore(Path(td)/'j.db')
+   try:
+    with self.assertRaisesRegex(AgentError,'max_seconds'):s.create(AgentSpec('r','11'*32,'bad',('repo.read',),max_seconds=0))
+   finally:s.close()

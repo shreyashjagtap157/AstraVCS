@@ -39,7 +39,7 @@ class SharedControlPlane:
   self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
   self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
   self.merge_queue=Table('cp_merge_queue',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256),nullable=False),Column('target_ref',Text,nullable=False),Column('proposal_id',String(64),nullable=False,unique=True),Column('source_revision',String(64),nullable=False),Column('state',String(16),nullable=False),Column('enqueued_by',String(256),nullable=False),Column('enqueued_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
-  self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0),Column('claim_generation',Integer,nullable=False,default=0))
+  self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0),Column('claim_generation',Integer,nullable=False,default=0),Column('max_seconds',Integer,nullable=False,default=900),Column('deadline_at',Integer))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
   self.workspaces_t=Table('cp_workspace_manifests',self.meta,Column('id',String(64),primary_key=True),Column('name',String(256)),Column('blob_key',String(64)),Column('created',Integer))
   self.orgs=Table('cp_organizations',self.meta,Column('id',String(64),primary_key=True),Column('name',String(128),unique=True,nullable=False))
@@ -64,6 +64,8 @@ class SharedControlPlane:
    if 'lease_until' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN lease_until INTEGER'))
    if 'attempts' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'))
    if 'claim_generation' not in job_cols:c.execute(text('ALTER TABLE cp_agent_jobs ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0'))
+   if 'max_seconds' not in job_cols:c.execute(text('ALTER TABLE cp_agent_jobs ADD COLUMN max_seconds INTEGER NOT NULL DEFAULT 900'))
+   if 'deadline_at' not in job_cols:c.execute(text('ALTER TABLE cp_agent_jobs ADD COLUMN deadline_at INTEGER'))
    c.execute(text('UPDATE cp_reviews SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_reviews.proposal_id) WHERE source_revision IS NULL'))
    c.execute(text('UPDATE cp_checks SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_checks.proposal_id) WHERE source_revision IS NULL'))
    legacy=[dict(x) for x in c.execute(select(self.checks).where(self.checks.c.source_revision!=None)).mappings()]
@@ -452,17 +454,21 @@ class SQLAgentJobStore:
  def close(self):pass
  def create(self,spec:AgentSpec):
   if spec.network_policy not in ('deny','allowlist','unrestricted'):raise AgentError('invalid network policy')
+  if not 1<=int(spec.max_seconds)<=86400:raise AgentError('max_seconds must be between 1 and 86400')
   jid=str(uuid.uuid4());now=int(time.time())
-  with self.cp.engine.begin() as c:c.execute(insert(self.cp.jobs).values(id=jid,repo=spec.repository,input_revision=spec.input_revision,task=spec.task,capabilities=json.dumps(spec.capabilities),network_policy=spec.network_policy,status='queued',result=None,created=now,updated=now,worker_id=None,lease_until=None,attempts=0,claim_generation=0))
+  with self.cp.engine.begin() as c:c.execute(insert(self.cp.jobs).values(id=jid,repo=spec.repository,input_revision=spec.input_revision,task=spec.task,capabilities=json.dumps(spec.capabilities),network_policy=spec.network_policy,status='queued',result=None,created=now,updated=now,worker_id=None,lease_until=None,attempts=0,claim_generation=0,max_seconds=int(spec.max_seconds),deadline_at=None))
   return jid
  def get(self,jid):
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.jobs).where(self.cp.jobs.c.id==jid)).mappings().first();return None if r is None else dict(r)
  def claim(self,jid,*,worker_id=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
-  worker_id=worker_id or str(uuid.uuid4());now=int(time.time());until=now+lease_seconds
+  worker_id=worker_id or str(uuid.uuid4());now=int(time.time())
   # Portable optimistic CAS: update only a queued or expired row, then inspect ownership.
+  row=self.get(jid)
+  if row is None:raise AgentError('job not found')
+  deadline=now+int(row.get('max_seconds') or 900);until=min(now+int(lease_seconds),deadline)
   with self.cp.engine.begin() as c:
-   res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,or_(self.cp.jobs.c.status=='queued',and_(self.cp.jobs.c.status=='running',self.cp.jobs.c.lease_until!=None,self.cp.jobs.c.lease_until<=now)))).values(status='running',worker_id=worker_id,lease_until=until,attempts=self.cp.jobs.c.attempts+1,claim_generation=self.cp.jobs.c.claim_generation+1,updated=now))
+   res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,or_(self.cp.jobs.c.status=='queued',and_(self.cp.jobs.c.status=='running',self.cp.jobs.c.lease_until!=None,self.cp.jobs.c.lease_until<=now)))).values(status='running',worker_id=worker_id,lease_until=until,deadline_at=deadline,attempts=self.cp.jobs.c.attempts+1,claim_generation=self.cp.jobs.c.claim_generation+1,updated=now))
    if res.rowcount!=1:
     row=c.execute(select(self.cp.jobs.c.id).where(self.cp.jobs.c.id==jid)).first()
     if row is None:raise AgentError('job not found')
@@ -470,8 +476,12 @@ class SQLAgentJobStore:
   out=self.get(jid);out['_claim_worker_id']=worker_id;out['_claim_generation']=out['claim_generation'];return out
  def heartbeat(self,jid,worker_id,*,claim_generation=None,lease_seconds=60):
   if claim_generation is None:raise AgentError('claim_generation required for heartbeat')
-  now=int(time.time())
-  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation,self.cp.jobs.c.lease_until>now)).values(lease_until=now+lease_seconds,updated=now))
+  now=int(time.time());row=self.get(jid)
+  if row is None:raise AgentError('job not found')
+  deadline=row.get('deadline_at')
+  if deadline is None or int(deadline)<=now:raise AgentError('agent job execution deadline expired')
+  until=min(now+int(lease_seconds),int(deadline))
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation,self.cp.jobs.c.lease_until>now,self.cp.jobs.c.deadline_at>now)).values(lease_until=until,updated=now))
   if res.rowcount!=1:raise AgentError('agent job lease is expired or not owned by this worker')
   return self.get(jid)
  def finish(self,jid,status,result,*,worker_id=None,claim_generation=None):
@@ -479,7 +489,7 @@ class SQLAgentJobStore:
   cond=and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running')
   if worker_id is not None:
    if claim_generation is None:raise AgentError('claim_generation required for worker-owned finish')
-   cond=and_(cond,self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation)
+   cond=and_(cond,self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation,self.cp.jobs.c.lease_until>int(time.time()),self.cp.jobs.c.deadline_at>int(time.time()))
   else:cond=and_(self.cp.jobs.c.worker_id==None,self.cp.jobs.c.status!='running')
   with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(cond).values(status=status,result=json.dumps(result,sort_keys=True),updated=int(time.time()),worker_id=None,lease_until=None))
   if res.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
@@ -488,7 +498,7 @@ class SQLAgentJobStore:
   row=self.get(jid)
   if not row:raise AgentError('job not found')
   if production and runtime.isolation_level.startswith('development'):raise AgentError('development agent runtime cannot satisfy production isolation')
-  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim=row.pop('_claim_worker_id');generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'])
+  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim=row.pop('_claim_worker_id');generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'],int(row.get('max_seconds') or 900))
   try:result=runtime.execute(spec,workspace)
   except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim,claim_generation=generation)
   if finalize:return self.finish(jid,'completed',result,worker_id=claim,claim_generation=generation)
