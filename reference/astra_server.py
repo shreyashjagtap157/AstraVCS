@@ -104,13 +104,13 @@ class AstraServer:
        self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
        state=parse_qs(urlparse(self.path).query).get('state',[None])[0];threads=outer.platform.list_review_threads(p[4],state)
-       return self._json(200,{'threads':[dict(t,comments=outer.platform.review_thread_comments(t['id'])) for t in threads]})
+       return self._json(200,{'threads':[dict(t,comments=outer.platform.review_thread_comments(t['id']),outdated=t['revision_id']!=proposal['source_revision']) for t in threads]})
       if len(p)==5 and p[3]=='review-threads':
        self._require('proposals.read',name);thread=outer.platform.get_review_thread(p[4])
        if not thread:return self._json(404,{'error':'review_thread_not_found'})
        proposal=outer.platform.get_proposal(thread['proposal_id'])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'review_thread_not_found'})
-       return self._json(200,{'thread':thread,'comments':outer.platform.review_thread_comments(p[4])})
+       return self._json(200,{'thread':dict(thread,outdated=thread['revision_id']!=proposal['source_revision']),'comments':outer.platform.review_thread_comments(p[4])})
       self._require('repo.read',name);repo=outer.registry.open(name)
       if p[3:]==['refs']:return self._json(200,{'refs':[[n.decode('utf-8','surrogateescape'),o] for n,o in repo.current_view().refs],'operation_head':repo.operation_head()})
       if len(p)==5 and p[3]=='revisions':
@@ -222,6 +222,10 @@ class AstraServer:
        refs[ref]=oid;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'api-ref-update',expected_head=body.get('expected_operation_head',repo.operation_head()));outer.platform.emit('ref.updated',name,principal.principal_id,{'ref':body['ref'],'revision':oid});return self._json(200,{'ref':body['ref'],'revision':oid,'operation_head':repo.operation_head()})
       if p[3:]==['proposals']:
        principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid);return self._json(201,{'id':pid,'target_revision':target_oid})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='refresh':
+       principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       source_revision=body['source_revision'];repo.get(ObjectType.REVISION,source_revision);row=outer.platform.update_proposal_source(p[4],source_revision,principal.principal_id,body.get('expected_old',proposal['source_revision']));return self._json(200,{'proposal':row})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviews':
        principal=self._require('reviews.write',name);outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''));return self._json(201,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='threads':

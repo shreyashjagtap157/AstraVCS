@@ -1,3 +1,10 @@
+## 0.39.0 - Revision-scoped proposal evidence
+
+- Added CAS-style proposal source refresh for open proposals with immutable old/new source audit events.
+- Scoped review approvals and check results to the exact proposal source Revision that produced them, preventing stale approvals/checks from satisfying policy after source updates.
+- Added safe local SQLite and shared SQL schema migrations that backfill pre-refresh evidence to the proposal source that was immutable in earlier releases.
+- Marked review threads as outdated when anchored to an older proposal source Revision and exposed proposal refresh through the typed web client.
+
 ## 0.38.0 - Verified review anchors and review surface
 
 - Added hosted verification that inline review threads anchor to the proposal source Revision and the exact NodeID/path present in that Revision's Tree.

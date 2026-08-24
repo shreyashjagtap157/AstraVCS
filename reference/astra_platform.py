@@ -18,7 +18,14 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
-  ''');self.db.commit()
+  ''')
+  review_cols={r['name'] for r in self.db.execute('PRAGMA table_info(reviews)')}
+  if 'source_revision' not in review_cols:self.db.execute('ALTER TABLE reviews ADD COLUMN source_revision TEXT')
+  check_cols={r['name'] for r in self.db.execute('PRAGMA table_info(checks)')}
+  if 'source_revision' not in check_cols:self.db.execute('ALTER TABLE checks ADD COLUMN source_revision TEXT')
+  self.db.execute('UPDATE reviews SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=reviews.proposal_id) WHERE source_revision IS NULL')
+  self.db.execute('UPDATE checks SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=checks.proposal_id) WHERE source_revision IS NULL')
+  self.db.commit()
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
   cur=self.db.execute('INSERT INTO events(type,repo,actor,payload,created_at) VALUES(?,?,?,?,?)',(event_type,repo,actor,json.dumps(payload,sort_keys=True,separators=(',',':')),int(time.time())));self.db.commit();return cur.lastrowid
@@ -28,11 +35,17 @@ class CollaborationStore:
   r=self.db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   return [dict(x) for x in self.db.execute('SELECT * FROM proposals WHERE repo=? AND status=? ORDER BY created_at,id',(repo,status))]
+ def update_proposal_source(self,pid,source_revision,actor,expected_old=None):
+  validate_object_id(source_revision,'RevisionID');p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  if p['status']!='open':raise PlatformError('proposal is not open')
+  if expected_old is not None and p['source_revision']!=expected_old:raise PlatformError('proposal source advanced')
+  self.db.execute('UPDATE proposals SET source_revision=? WHERE id=?',(source_revision,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision});return self.get_proposal(pid)
  def add_review(self,pid,reviewer,state,body=''):
   if state not in ('approved','changes_requested','commented'):raise PlatformError('invalid review state')
-  p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
+  p=self.db.execute('SELECT repo,source_revision FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
-  self.db.execute('INSERT INTO reviews(proposal_id,reviewer,state,body,created_at) VALUES(?,?,?,?,?)',(pid,reviewer,state,body,int(time.time())));self.db.commit();self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
+  self.db.execute('INSERT INTO reviews(proposal_id,reviewer,state,body,created_at,source_revision) VALUES(?,?,?,?,?,?)',(pid,reviewer,state,body,int(time.time()),p['source_revision']));self.db.commit();self.emit('review.submitted',p['repo'],reviewer,{'proposal_id':pid,'state':state})
  def create_review_thread(self,pid,revision_id,node_id,path,author,body,line_start=None,line_end=None):
   proposal=self.get_proposal(pid)
   if not proposal:raise PlatformError('proposal not found')
@@ -69,12 +82,14 @@ class CollaborationStore:
   self.db.execute('UPDATE review_threads SET state=?,resolved_by=?,resolved_at=? WHERE id=?',(state,actor if resolved else None,now if resolved else None,tid));self.db.commit()
   self.emit('review.thread.'+('resolved' if resolved else 'reopened'),proposal['repo'],actor,{'proposal_id':thread['proposal_id'],'thread_id':tid});return self.get_review_thread(tid)
  def set_check(self,pid,name,status,conclusion=None,details=''):
-  p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()
+  p=self.db.execute('SELECT repo,source_revision FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
-  self.db.execute('INSERT INTO checks(proposal_id,name,status,conclusion,details,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id,name) DO UPDATE SET status=excluded.status,conclusion=excluded.conclusion,details=excluded.details,updated_at=excluded.updated_at',(pid,name,status,conclusion,details,int(time.time())));self.db.commit();self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion})
+  self.db.execute('INSERT INTO checks(proposal_id,name,status,conclusion,details,updated_at,source_revision) VALUES(?,?,?,?,?,?,?) ON CONFLICT(proposal_id,name) DO UPDATE SET status=excluded.status,conclusion=excluded.conclusion,details=excluded.details,updated_at=excluded.updated_at,source_revision=excluded.source_revision',(pid,name,status,conclusion,details,int(time.time()),p['source_revision']));self.db.commit();self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion})
  def policy_evidence(self,pid):
-  reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=?',(pid,))]
-  checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM checks WHERE proposal_id=?',(pid,))}
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))]
+  checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM checks WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))}
   return {'reviews':reviews,'checks':checks}
  def require_policy(self,pid,policy):
   evidence=self.policy_evidence(pid);latest={}

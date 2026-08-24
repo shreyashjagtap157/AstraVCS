@@ -1,7 +1,7 @@
 export interface RefRecord { refs: [string,string][]; operation_head: string|null }
 export interface RepositoryList { repositories: string[] }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number }
-export interface ReviewThread { id:string; proposal_id:string; revision_id:string; node_id:string; path_hex:string; line_start:number|null; line_end:number|null; state:'open'|'resolved'; author:string; created_at:number; resolved_by:string|null; resolved_at:number|null; comments?:ReviewThreadComment[] }
+export interface ReviewThread { id:string; proposal_id:string; revision_id:string; node_id:string; path_hex:string; line_start:number|null; line_end:number|null; state:'open'|'resolved'; author:string; created_at:number; resolved_by:string|null; resolved_at:number|null; comments?:ReviewThreadComment[]; outdated?:boolean }
 export interface ReviewThreadComment { id:number; thread_id:string; author:string; body:string; created_at:number }
 
 export interface RevisionRecord { revision:string; parents:string[]; tree:string; change_version:string|null }
@@ -29,6 +29,7 @@ export class AstraApi {
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}
+  refreshProposal(repo:string,proposalId:string,sourceRevision:string,expectedOld?:string):Promise<{proposal:Proposal}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/refresh`,{method:'POST',body:JSON.stringify({source_revision:sourceRevision,...(expectedOld?{expected_old:expectedOld}:{})})})}
   reviewThreads(repo:string,proposalId:string,state?:'open'|'resolved'):Promise<{threads:ReviewThread[]}>{const q=state?`?state=${state}`:'';return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/threads${q}`)}
   createReviewThread(repo:string,proposalId:string,input:{revision_id:string;node_id:string;path_hex:string;body:string;line_start?:number;line_end?:number}):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/threads`,{method:'POST',body:JSON.stringify(input)})}
   reviewThread(repo:string,threadId:string):Promise<{thread:ReviewThread;comments:ReviewThreadComment[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/review-threads/${encodeURIComponent(threadId)}`)}
