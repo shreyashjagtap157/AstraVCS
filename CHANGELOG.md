@@ -1,3 +1,9 @@
+## 0.33.0 - Astra-only self-host continuation
+
+- Extended self-host qualification beyond Git dual-control seeding: after the first Astra restore, the gate stops consulting Git, creates/switches an Astra branch, records a new Astra revision, bundles it again, restores it again, and verifies the new content/history solely through Astra semantics.
+- Added explicit self-host qualification documentation separating the initial Git-seeded comparison from the subsequent Git-free Astra continuation phase.
+- Kept Git as an interoperability/recovery mirror recommendation while demonstrating that continued Astra history no longer technically depends on Git after the seed.
+
 ## 0.32.0 - Checked-in backward compatibility artifacts
 
 - Added a checked-in bootstrap Repository Format 0 artifact and a real legacy `astravcs-bundle-v1` archive as release-compatibility fixtures.

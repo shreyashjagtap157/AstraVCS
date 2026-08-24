@@ -4,11 +4,11 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.32.0` — checked-in backward-compatibility artifact milestone.
+`v0.33.0` — Astra-only self-host continuation milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 
-`v0.32.0` adds checked-in legacy Repository Format 0 and Bundle-v1 artifacts to the release gate, on top of explicit compatibility negotiation and Repository Format 1 while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
+`v0.33.0` extends self-host qualification with a Git-free Astra continuation/bundle/restore phase, on top of checked-in backward compatibility artifacts and explicit negotiation while retaining the complete local VCS, hosted/HA platform, Git round-trip, merge/recovery, sparse/lazy/resumable data plane, collaboration/issues/packages, enterprise identity, plugins/AI/agents, policy control plane, native/web clients, Mission Assurance primitives, self-hosting and soak/conformance gates built through earlier milestones.
 
 The Rust crates remain a mirrored implementation surface but Rust qualification is explicitly deferred in this runtime because `cargo`/`rustc` are unavailable. The Python reference implementation is the executable semantic oracle until the Rust toolchain gate can run.
 

@@ -25,8 +25,8 @@ def git_entries():
  return items
 
 def main():
- expected=git_entries()
- with tempfile.TemporaryDirectory(prefix='astra-selfhost-') as td,tempfile.NamedTemporaryFile(suffix='.astra') as bf,tempfile.TemporaryDirectory(prefix='astra-selfhost-restore-') as rd:
+ expected=git_entries();git_head=git('rev-parse','HEAD')
+ with tempfile.TemporaryDirectory(prefix='astra-selfhost-') as td,tempfile.NamedTemporaryFile(suffix='.astra') as bf,tempfile.TemporaryDirectory(prefix='astra-selfhost-restore-') as rd,tempfile.NamedTemporaryFile(suffix='.astra') as bf2,tempfile.TemporaryDirectory(prefix='astra-selfhost-astra-only-') as rd2:
   raw=git('archive','--format=tar','HEAD',raw=True)
   with tarfile.open(fileobj=io.BytesIO(raw),mode='r:') as tf:tf.extractall(td,filter='data')
   repo=AstraRepository.init(td);ws=LocalWorkspace(repo);commit=ws.commit(b'AstraVCS self-host qualification')
@@ -41,6 +41,19 @@ def main():
   create_portable_bundle(repo,bf.name);restored=AstraRepository.init(rd);apply_portable_bundle(restored,bf.name,publish_refs=True)
   if not restored.fsck().ok:raise RuntimeError('restored self-host repository fsck failed')
   if dict(restored.current_view().refs)!=dict(repo.current_view().refs):raise RuntimeError('restored refs differ')
-  print(json.dumps({'git_head':git('rev-parse','HEAD'),'paths':len(expected),'astra_revision':commit.revision_id,'tree':commit.tree_id,'bundle_restore':True,'fsck':True},sort_keys=True))
+  # Phase 2 deliberately stops consulting Git. Continue AstraVCS's own history,
+  # publish it on an Astra branch, bundle it, and restore it using Astra only.
+  rws=LocalWorkspace(restored);base=rws.head();rws.create_branch(b'astra-selfhost',base);rws.switch_branch(b'astra-selfhost',force=True)
+  marker=Path(rd)/'.astra-selfhost-continuation';marker.write_bytes(b'Astra-on-Astra continuation\n')
+  continued=rws.commit(b'Astra-on-Astra self-host continuation')
+  if continued.revision_id==base:raise RuntimeError('Astra-only continuation did not create a new revision')
+  if dict(restored.current_view().refs).get(b'refs/heads/astra-selfhost')!=continued.revision_id:raise RuntimeError('Astra-only branch did not advance')
+  if not restored.fsck().ok:raise RuntimeError('Astra-only continued repository fsck failed')
+  create_portable_bundle(restored,bf2.name);second=AstraRepository.init(rd2);apply_portable_bundle(second,bf2.name,publish_refs=True)
+  if not second.fsck().ok:raise RuntimeError('second Astra-only bundle restore fsck failed')
+  if dict(second.current_view().refs).get(b'refs/heads/astra-selfhost')!=continued.revision_id:raise RuntimeError('Astra-only revision was not preserved by second restore')
+  rev2=second.get(ObjectType.REVISION,continued.revision_id);tree2=second.get(ObjectType.TREE,rev2.tree_id);entries=dict(tree2.entries);entry=entries.get(b'.astra-selfhost-continuation')
+  if entry is None or second.get_content(entry.content_id)!=b'Astra-on-Astra continuation\n':raise RuntimeError('Astra-only continued content was not reconstructed')
+  print(json.dumps({'git_head':git_head,'paths':len(expected),'astra_revision':commit.revision_id,'tree':commit.tree_id,'bundle_restore':True,'astra_only_revision':continued.revision_id,'astra_only_second_restore':True,'fsck':True},sort_keys=True))
  return 0
 if __name__=='__main__':raise SystemExit(main())
