@@ -4,7 +4,7 @@ ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'reference')
 from astra_platform import CollaborationStore,PlatformError
 from astra_shared_control import SharedControlPlane
 from astra_backend import FileBlobBackend
-from astra_security import TokenStore,Principal,Grant
+from astra_security import TokenStore,Principal,Grant,RefPolicy
 from astra_server import AstraServer,RepositoryRegistry
 from astra_identity import OrganizationStore
 
@@ -51,5 +51,26 @@ class RequestedReviewerTests(unittest.TestCase):
     with self.assertRaises(PlatformError):s.request_reviewers(pid,'a')
     with self.assertRaises(PlatformError):s.list_requested_reviewers(pid,'bogus')
    finally:s.close()
+
+
+ def test_requested_reviewer_merge_policy(self):
+  with tempfile.TemporaryDirectory() as td:
+   s=CollaborationStore(Path(td)/'p.db')
+   try:
+    pid=s.open_proposal('r','refs/heads/main',R1,'author',R1);s.request_reviewers(pid,'author',('alice',),())
+    with self.assertRaises(PlatformError):s.require_policy(pid,RefPolicy(require_requested_reviewers=True))
+    s.add_review(pid,'alice','approved');self.assertTrue(s.require_policy(pid,RefPolicy(require_requested_reviewers=True)))
+    s.update_proposal_source(pid,R2,'author',R1)
+    with self.assertRaises(PlatformError):s.require_policy(pid,RefPolicy(require_requested_reviewers=True))
+    s.remove_requested_reviewers(pid,'author',('alice',),());self.assertTrue(s.require_policy(pid,RefPolicy(require_requested_reviewers=True)))
+   finally:s.close()
+ def test_shared_requested_reviewer_policy_matches_local(self):
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str((Path(td)/'cp.db').resolve());cp=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'))
+   try:
+    s=cp.platform_store;pid=s.open_proposal('r','refs/heads/main',R1,'author',R1);s.request_reviewers(pid,'author',('alice',),())
+    with self.assertRaises(PlatformError):s.require_policy(pid,RefPolicy(require_requested_reviewers=True))
+    s.add_review(pid,'alice','approved');self.assertTrue(s.require_policy(pid,RefPolicy(require_requested_reviewers=True)))
+   finally:cp.close()
 
 if __name__=='__main__':unittest.main()

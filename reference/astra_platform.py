@@ -130,6 +130,9 @@ class CollaborationStore:
   if getattr(policy,'require_resolved_threads',False):
    p=self.get_proposal(pid);open_current=[t for t in self.list_review_threads(pid,'open') if t['revision_id']==p['source_revision']]
    if open_current:raise PlatformError(f'proposal has {len(open_current)} unresolved review threads')
+  if getattr(policy,'require_requested_reviewers',False):
+   outstanding=self.list_requested_reviewers(pid,'requested')
+   if outstanding:raise PlatformError(f'proposal has {len(outstanding)} outstanding requested reviewers')
   return True
  def close_proposal(self,pid,actor,state='merged'):
   p=self.db.execute('SELECT repo FROM proposals WHERE id=?',(pid,)).fetchone()

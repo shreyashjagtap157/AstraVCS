@@ -1,3 +1,10 @@
+## 0.42.0 - Required requested-reviewer policy
+
+- Added the backward-compatible `require_requested_reviewers` protected-ref policy flag.
+- Blocked proposal merge while principal/team reviewer requests remain outstanding, while removed requests do not block.
+- Preserved source-refresh semantics: previously fulfilled requests become outstanding again when the proposal source Revision advances.
+- Added shared SQL/HA parity, policy database migration, hosted API/web typing, and local/shared regression coverage.
+
 ## 0.41.0 - Requested reviewers and team review lifecycle
 
 - Added durable requested-reviewer state for principals and teams, including request, removal, fulfillment, and source-refresh re-request transitions.

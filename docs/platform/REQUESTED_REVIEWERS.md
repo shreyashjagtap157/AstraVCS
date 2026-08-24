@@ -7,3 +7,7 @@ A review from the requested principal fulfills that principal request. A team re
 When an open proposal moves to a new source Revision, every previously fulfilled request returns to `requested`. This complements revision-scoped approvals/checks: old review evidence remains auditable but does not silently satisfy the refreshed proposal.
 
 Local SQLite and shared SQL/HA stores implement identical lifecycle semantics. Typed platform events record request, removal, fulfillment, and source-refresh re-request effects.
+
+## Merge policy
+
+Protected refs may set `require_requested_reviewers`. When enabled, merge policy rejects a proposal while any reviewer/team request remains in `requested` state. `fulfilled` and `removed` requests do not block. Proposal source refresh returns fulfilled requests to `requested`, so stale review participation cannot satisfy a refreshed proposal.
