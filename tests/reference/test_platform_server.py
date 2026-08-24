@@ -64,6 +64,20 @@ class ProtectedProposalMergeTests(unittest.TestCase):
     post(f'/v1/repos/r/proposals/{p}/reviews',{'state':'approved'});post(f'/v1/repos/r/proposals/{p}/checks',{'name':'tests','status':'completed','conclusion':'success'});merged=post(f'/v1/repos/r/proposals/{p}/merge',{})['revision'];self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],merged)
    finally:s.close()
 
+ def test_protected_merge_can_require_resolved_current_threads(self):
+  from astra_security import Principal,Grant,RefPolicy
+  from astra_codec import ObjectType
+  with tempfile.TemporaryDirectory() as td:
+   s=AstraServer(td,policies=[RefPolicy('refs/heads/main','refs.protected.write',0,(),True)]);s.registry.create('r');repo=s.registry.open('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');w.checkout(base.revision_id,ref=None,force=True);(repo.worktree/'x').write_text('source');source=w.commit(b'source');src=repo.get(ObjectType.REVISION,source.revision_id);entry=repo.get(ObjectType.TREE,src.tree_id).as_dict()[b'x'];w.checkout(base.revision_id,ref=b'refs/heads/main',force=True)
+   tok=s.tokens.issue(Principal('admin','human'),[Grant('*','*')],None);host,port=s.serve();url=f'http://{host}:{port}'
+   def post(path,body):
+    req=urllib.request.Request(url+path,data=json.dumps(body).encode(),method='POST',headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'});return json.loads(urllib.request.urlopen(req).read())
+   try:
+    pid=post('/v1/repos/r/proposals',{'target_ref':'refs/heads/main','source_revision':source.revision_id})['id'];tid=post(f'/v1/repos/r/proposals/{pid}/threads',{'revision_id':source.revision_id,'node_id':entry.node_id,'path_hex':b'x'.hex(),'body':'resolve me'})['id']
+    with self.assertRaises(urllib.error.HTTPError):post(f'/v1/repos/r/proposals/{pid}/merge',{})
+    post(f'/v1/repos/r/review-threads/{tid}/resolve',{});merged=post(f'/v1/repos/r/proposals/{pid}/merge',{})['revision'];self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],merged)
+   finally:s.close()
+
 class HTTPResumableSyncTests(unittest.TestCase):
  def test_remote_resumable_plan_and_object_transfer(self):
   from astra_http_sync import HTTPResumableSyncSession

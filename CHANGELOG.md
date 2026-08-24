@@ -1,3 +1,10 @@
+## 0.40.0 - Resolved-review-thread merge policy
+
+- Added an optional `require_resolved_threads` protected-ref policy field with backward-compatible persistence migration.
+- Enforced unresolved current-source review-thread blocking in both local and shared SQL collaboration policy evaluation.
+- Kept outdated threads from prior proposal source revisions auditable without blocking refreshed proposals.
+- Added hosted merge regression coverage and typed web policy support for the new policy flag.
+
 ## 0.39.0 - Revision-scoped proposal evidence
 
 - Added CAS-style proposal source refresh for open proposals with immutable old/new source audit events.

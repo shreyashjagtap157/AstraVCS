@@ -12,7 +12,7 @@ export interface PackageVersion { namespace:string; name:string; version:string;
 export interface PlatformEvent { id:number; type:string; repo:string|null; actor:string; payload:string|Record<string,unknown>; created_at:number }
 
 
-export interface RefPolicyRecord { pattern:string; required_capability:string; required_reviews:number; required_checks:string[]; priority:number; updated:number }
+export interface RefPolicyRecord { pattern:string; required_capability:string; required_reviews:number; required_checks:string[]; require_resolved_threads:boolean; priority:number; updated:number }
 export interface PluginRecord { id:string; version:string; model:string; entrypoint:string; requested:string[]; granted:string[]; enabled:number; updated:number }
 export interface PluginCatalogEntry { plugin_id:string; version:string; execution_model:string; requested_capabilities:string[]; entrypoint:string; digest?:string }
 export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
@@ -54,6 +54,6 @@ export class AstraApi {
   rotatePluginSecret(pluginId:string):Promise<{secret:string}>{return this.request(`/v1/plugins/${encodeURIComponent(pluginId)}/rotate-secret`,{method:'POST',body:'{}'})}
   uninstallPlugin(pluginId:string):Promise<{ok:boolean}>{return this.request(`/v1/plugins/${encodeURIComponent(pluginId)}/uninstall`,{method:'POST',body:'{}'})}
   policies():Promise<{policies:RefPolicyRecord[]}>{return this.request('/v1/policies')}
-  upsertPolicy(policy:{pattern:string;required_capability?:string;required_reviews?:number;required_checks?:string[];priority?:number}):Promise<{policy:RefPolicyRecord}>{return this.request('/v1/policies/upsert',{method:'POST',body:JSON.stringify(policy)})}
+  upsertPolicy(policy:{pattern:string;required_capability?:string;required_reviews?:number;required_checks?:string[];require_resolved_threads?:boolean;priority?:number}):Promise<{policy:RefPolicyRecord}>{return this.request('/v1/policies/upsert',{method:'POST',body:JSON.stringify(policy)})}
   deletePolicy(pattern:string):Promise<{ok:boolean}>{return this.request('/v1/policies/delete',{method:'POST',body:JSON.stringify({pattern})})}
 }

@@ -58,4 +58,24 @@ class ProposalRefreshTests(unittest.TestCase):
     tid=req(f'/v1/repos/r/proposals/{pid}/threads',{'revision_id':r1,'node_id':entry.node_id,'path_hex':b'a.py'.hex(),'body':'old'})['id'];req(f'/v1/repos/r/proposals/{pid}/refresh',{'source_revision':r2,'expected_old':r1});threads=req(f'/v1/repos/r/proposals/{pid}/threads')['threads'];self.assertTrue(next(t for t in threads if t['id']==tid)['outdated']);self.assertEqual(platform.policy_evidence(pid),{'reviews':[],'checks':{}})
    finally:srv.close();tokens.close();platform.close()
 
+
+ def test_resolved_thread_policy_blocks_only_current_source(self):
+  with tempfile.TemporaryDirectory() as td:
+   s=CollaborationStore(Path(td)/'p.db')
+   try:
+    pid=s.open_proposal('r','refs/heads/main',R1,'author',R1);tid=s.create_review_thread(pid,R1,NODE,b'a.py','reviewer','block')
+    policy=RefPolicy(require_resolved_threads=True)
+    with self.assertRaises(PlatformError):s.require_policy(pid,policy)
+    s.resolve_review_thread(tid,'reviewer');self.assertTrue(s.require_policy(pid,policy))
+    s.resolve_review_thread(tid,'reviewer',False);s.update_proposal_source(pid,R2,'author',R1);self.assertTrue(s.require_policy(pid,policy))
+   finally:s.close()
+ def test_shared_resolved_thread_policy_matches_local(self):
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str((Path(td)/'cp.db').resolve());cp=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'))
+   try:
+    s=cp.platform_store;pid=s.open_proposal('r','refs/heads/main',R1,'author',R1);tid=s.create_review_thread(pid,R1,NODE,b'a.py','reviewer','block')
+    with self.assertRaises(PlatformError):s.require_policy(pid,RefPolicy(require_resolved_threads=True))
+    s.resolve_review_thread(tid,'reviewer');self.assertTrue(s.require_policy(pid,RefPolicy(require_resolved_threads=True)))
+   finally:cp.close()
+
 if __name__=='__main__':unittest.main()

@@ -34,3 +34,7 @@ The hosted API additionally verifies that a new thread anchors to the proposal's
 ## Proposal source refresh and evidence scope
 
 Open proposals may CAS-refresh their source Revision. Reviews and checks record the proposal source Revision at submission/update time. Merge-policy evidence includes only reviews/checks whose recorded source Revision equals the proposal's current source Revision; prior evidence remains auditable but is stale. Review threads remain anchored to their original immutable Revision and are projected as `outdated` when the proposal moves to a newer source Revision. Existing pre-refresh review/check rows are backfilled to the then-current proposal source during schema migration because earlier Astra versions did not allow proposal source mutation.
+
+## Protected-ref resolved-thread policy
+
+A protected-ref policy may set `require_resolved_threads`. When enabled, merge policy fails while any open review thread is anchored to the proposal's current source Revision. Open threads anchored to an older source Revision are historical/outdated and do not block the refreshed proposal. The flag defaults to false and existing policy databases migrate with false, preserving previous behavior.

@@ -235,6 +235,9 @@ class SQLCollaborationStore:
   for name in policy.required_checks:
    c=evidence['checks'].get(name)
    if not c or c.get('status')!='completed' or c.get('conclusion')!='success':raise PlatformError(f'required check {name} has not succeeded')
+  if getattr(policy,'require_resolved_threads',False):
+   p=self.get_proposal(pid);open_current=[t for t in self.list_review_threads(pid,'open') if t['revision_id']==p['source_revision']]
+   if open_current:raise PlatformError(f'proposal has {len(open_current)} unresolved review threads')
   return True
  def close_proposal(self,pid,actor,state='merged'):
   p=self.get_proposal(pid)
