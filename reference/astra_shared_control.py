@@ -484,6 +484,14 @@ class SQLAgentJobStore:
     if row is None:raise AgentError('job not found')
     raise AgentError('agent job is not queued or reclaimable')
   out=self.get(jid);out['_claim_worker_id']=worker_id;out['_claim_generation']=out['claim_generation'];return out
+ def assert_owned(self,jid,worker_id,*,claim_generation=None):
+  if claim_generation is None:raise AgentError('claim_generation required for ownership check')
+  now=int(time.time())
+  with self.cp.engine.connect() as c:row=c.execute(select(self.cp.jobs.c.id).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==worker_id,self.cp.jobs.c.claim_generation==claim_generation,self.cp.jobs.c.lease_until>now,self.cp.jobs.c.deadline_at>now))).first()
+  if row is None:
+   if self.get(jid) is None:raise AgentError('job not found')
+   raise AgentError('agent job lease is expired or not owned by this worker')
+  return self.get(jid)
  def heartbeat(self,jid,worker_id,*,claim_generation=None,lease_seconds=60):
   if claim_generation is None:raise AgentError('claim_generation required for heartbeat')
   now=int(time.time());row=self.get(jid)

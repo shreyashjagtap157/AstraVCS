@@ -1,3 +1,10 @@
+## 0.60.0.0 - Agent publication ownership fences
+
+- Added an explicit generation-fenced live-ownership assertion to local SQLite and shared SQL autonomous-agent stores.
+- Revalidated the exact worker generation immediately before importing generated repository objects and immediately before proposal publication.
+- Prevented an execution that expires, is cancelled, or is reclaimed after runtime-result persistence from crossing later publication boundaries.
+- Added permanent local and shared-control regressions for pre-publication ownership validation.
+
 ## 0.59.0.0 - Agent side-effect lease fencing
 
 - Fenced non-terminal autonomous-agent result persistence by live lease, execution deadline, worker identity, and claim generation.

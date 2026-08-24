@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.59.0.0`
+`v0.60.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.59.0.0` closes the autonomous-agent side-effect window after runtime execution. Non-terminal results now persist only while the exact worker generation still owns a live lease inside its execution deadline, so an expired, cancelled, or reclaimed execution cannot proceed into repository-object import or proposal publication. Local SQLite and shared SQL stores enforce the same fail-closed predicate.
+`v0.60.0.0` adds repeated generation-fenced ownership validation at autonomous-agent publication boundaries. Runtime result acceptance alone is no longer sufficient: the exact worker generation must still own a live lease immediately before repository-object import and proposal publication, with identical local SQLite and shared SQL semantics.
 
 ## Validation available in this environment
 

@@ -79,6 +79,13 @@ class AgentJobStore:
    if self.db.in_transaction:self.db.rollback()
    raise
   out=self.get(jid);out['_claim_worker_id']=worker_id;out['_claim_generation']=out['claim_generation'];return out
+ def assert_owned(self,jid,worker_id,*,claim_generation=None):
+  if claim_generation is None:raise AgentError('claim_generation required for ownership check')
+  now=int(time.time());row=self.db.execute('SELECT 1 FROM jobs WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>? AND deadline_at>?',(jid,'running',worker_id,claim_generation,now,now)).fetchone()
+  if row is None:
+   if self.get(jid) is None:raise AgentError('job not found')
+   raise AgentError('agent job lease is expired or not owned by this worker')
+  return self.get(jid)
  def heartbeat(self,jid,worker_id,*,claim_generation=None,lease_seconds=60):
   if lease_seconds<1:raise AgentError('lease_seconds must be positive')
   if claim_generation is None:raise AgentError('claim_generation required for heartbeat')
@@ -138,9 +145,9 @@ class AgentCoordinator:
    if not ws.status():
     return self.jobs.finish(jid,'no_change',{'reason':'agent completed without producing a repository change'},worker_id=claim_worker,claim_generation=claim_generation)
    commit=ws.commit(('Agent: '+row['task']).encode())
-   create_portable_bundle(agent,bundle.name);apply_portable_bundle(source,bundle.name,publish_refs=False)
+   create_portable_bundle(agent,bundle.name);self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);apply_portable_bundle(source,bundle.name,publish_refs=False)
    current=dict(source.current_view().refs).get(target_ref.encode())
    if current!=input_revision:
     return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced since agent input revision; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker,claim_generation=claim_generation)
-   pid=self.platform.open_proposal(row['repo'],target_ref,commit.revision_id,'agent:'+jid,current)
+   self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);pid=self.platform.open_proposal(row['repo'],target_ref,commit.revision_id,'agent:'+jid,current)
    payload=json.loads(result.get('result') or '{}');payload.update({'revision':commit.revision_id,'proposal_id':pid});return self.jobs.finish(jid,'completed',payload,worker_id=claim_worker,claim_generation=claim_generation)

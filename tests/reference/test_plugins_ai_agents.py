@@ -248,6 +248,17 @@ class AgentCancellationTests(unittest.TestCase):
    finally:jobs.close()
 
 class AgentSideEffectFenceTests(unittest.TestCase):
+
+ def test_prepublication_ownership_check_fails_after_expiry(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   jobs=AgentJobStore(Path(td)/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r','11'*32,'publish',('repo.read',),max_seconds=30));row=jobs.claim(jid,worker_id='w',lease_seconds=30);g=row['claim_generation']
+    self.assertEqual(jobs.assert_owned(jid,'w',claim_generation=g)['status'],'running')
+    jobs.db.execute('UPDATE jobs SET lease_until=? WHERE id=?',(int(time.time())-1,jid));jobs.db.commit()
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):jobs.assert_owned(jid,'w',claim_generation=g)
+   finally:jobs.close()
  def test_expired_runtime_cannot_persist_intermediate_result(self):
   from astra_agents import AgentJobStore,AgentSpec,CallbackAgentRuntime,AgentError
   with tempfile.TemporaryDirectory() as td:

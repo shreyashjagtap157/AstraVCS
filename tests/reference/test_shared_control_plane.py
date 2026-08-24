@@ -119,6 +119,7 @@ class SharedAgentExecutionDeadlineTests(unittest.TestCase):
    try:
     jid=a.agent_store.create(AgentSpec('r','11'*32,'budget',('repo.read',),max_seconds=5));row=b.agent_store.claim(jid,worker_id='w',lease_seconds=60)
     self.assertEqual(row['max_seconds'],5);self.assertEqual(row['lease_until'],row['deadline_at'])
+    self.assertEqual(b.agent_store.assert_owned(jid,'w',claim_generation=row['claim_generation'])['status'],'running')
     with b.engine.begin() as c:c.execute(__import__('sqlalchemy').text('UPDATE cp_agent_jobs SET lease_until=:t, deadline_at=:t WHERE id=:id'),{'t':int(time.time())-1,'id':jid})
     with self.assertRaisesRegex(AgentError,'deadline expired'):a.agent_store.heartbeat(jid,'w',claim_generation=row['claim_generation'],lease_seconds=5)
    finally:a.close();b.close()
