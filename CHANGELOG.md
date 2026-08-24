@@ -1,3 +1,10 @@
+## 0.59.0.0 - Agent side-effect lease fencing
+
+- Fenced non-terminal autonomous-agent result persistence by live lease, execution deadline, worker identity, and claim generation.
+- Prevented an expired or concurrently cancelled/reclaimed runtime from crossing the coordinator boundary into repository-object import or proposal publication.
+- Applied the same fail-closed intermediate-result semantics to local SQLite and dialect-neutral shared SQL agent stores.
+- Added permanent local coordinator and cross-node shared-control regressions for expired-runtime side-effect suppression.
+
 ## 0.58.0.0 - Generation-fenced agent cancellation
 
 - Added durable cancellation for queued autonomous-agent jobs and generation-fenced cancellation for running jobs.

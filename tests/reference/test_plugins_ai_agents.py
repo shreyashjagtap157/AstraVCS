@@ -246,3 +246,30 @@ class AgentCancellationTests(unittest.TestCase):
     self.assertEqual(jobs.cancel(jid,worker_id='w',claim_generation=row['claim_generation'])['status'],'cancelled')
     with self.assertRaisesRegex(AgentError,'not owned'):jobs.finish(jid,'completed',{},worker_id='w',claim_generation=row['claim_generation'])
    finally:jobs.close()
+
+class AgentSideEffectFenceTests(unittest.TestCase):
+ def test_expired_runtime_cannot_persist_intermediate_result(self):
+  from astra_agents import AgentJobStore,AgentSpec,CallbackAgentRuntime,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   jobs=AgentJobStore(Path(td)/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r','11'*32,'expire',('repo.read',),max_seconds=30))
+    def expire(spec,workspace):
+     jobs.db.execute('UPDATE jobs SET lease_until=?,deadline_at=? WHERE id=?',(int(time.time())-1,int(time.time())-1,jid));jobs.db.commit();return {'late':True}
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):jobs.run(jid,CallbackAgentRuntime(expire),Path(td),finalize=False,worker_id='w')
+    row=jobs.get(jid);self.assertEqual(row['status'],'running');self.assertIsNone(row['result'])
+   finally:jobs.close()
+ def test_expired_coordinator_runtime_cannot_publish_objects_or_proposal(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime,AgentError
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'late edit',('changes.create','proposals.create'),max_seconds=30));before=set(repo.store.iter_keys())
+    def expire(spec,workspace):
+     (workspace/'x').write_text('late');jobs.db.execute('UPDATE jobs SET lease_until=?,deadline_at=? WHERE id=?',(int(time.time())-1,int(time.time())-1,jid));jobs.db.commit();return {'late':True}
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(expire),worker_id='w')
+    self.assertEqual(platform.list_proposals('r'),[]);self.assertEqual(set(repo.store.iter_keys()),before)
+   finally:jobs.close();platform.close()

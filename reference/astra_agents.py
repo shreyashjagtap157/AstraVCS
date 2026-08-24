@@ -99,8 +99,8 @@ class AgentJobStore:
   try:result=runtime.execute(spec,workspace)
   except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim_worker,claim_generation=claim_generation)
   if finalize:return self.finish(jid,'completed',result,worker_id=claim_worker,claim_generation=claim_generation)
-  now=int(time.time());cur=self.db.execute('UPDATE jobs SET result=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=?',(json.dumps(result,sort_keys=True),now,jid,'running',claim_worker,claim_generation));self.db.commit()
-  if cur.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
+  now=int(time.time());cur=self.db.execute('UPDATE jobs SET result=?,updated=? WHERE id=? AND status=? AND worker_id=? AND claim_generation=? AND lease_until>? AND deadline_at>?',(json.dumps(result,sort_keys=True),now,jid,'running',claim_worker,claim_generation,now,now));self.db.commit()
+  if cur.rowcount!=1:raise AgentError('agent job lease is expired or not owned by this worker')
   out=self.get(jid);out['_claim_worker_id']=claim_worker;out['_claim_generation']=claim_generation;return out
 
 class MicroVMRuntime(AgentRuntime):

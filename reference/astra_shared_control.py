@@ -512,8 +512,9 @@ class SQLAgentJobStore:
   try:result=runtime.execute(spec,workspace)
   except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim,claim_generation=generation)
   if finalize:return self.finish(jid,'completed',result,worker_id=claim,claim_generation=generation)
-  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==claim,self.cp.jobs.c.claim_generation==generation)).values(result=json.dumps(result,sort_keys=True),updated=int(time.time())))
-  if res.rowcount!=1:raise AgentError('agent job lease is not owned by this worker')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:res=c.execute(update(self.cp.jobs).where(and_(self.cp.jobs.c.id==jid,self.cp.jobs.c.status=='running',self.cp.jobs.c.worker_id==claim,self.cp.jobs.c.claim_generation==generation,self.cp.jobs.c.lease_until>now,self.cp.jobs.c.deadline_at>now)).values(result=json.dumps(result,sort_keys=True),updated=now))
+  if res.rowcount!=1:raise AgentError('agent job lease is expired or not owned by this worker')
   out=self.get(jid);out['_claim_worker_id']=claim;out['_claim_generation']=generation;return out
 
 class SQLPackageRegistry:

@@ -136,3 +136,20 @@ class SharedAgentCancellationTests(unittest.TestCase):
     self.assertEqual(a.agent_store.cancel(jid,worker_id='a',claim_generation=row['claim_generation'],reason='stop')['status'],'cancelled')
     self.assertEqual(b.agent_store.get(jid)['status'],'cancelled')
    finally:a.close();b.close()
+
+class SharedAgentSideEffectFenceTests(unittest.TestCase):
+ def test_shared_expired_runtime_cannot_persist_intermediate_result(self):
+  import time
+  from astra_shared_control import SharedControlPlane
+  from astra_backend import FileBlobBackend
+  from astra_agents import AgentSpec,CallbackAgentRuntime,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);url='sqlite:///'+str(root/'cp.db');a=SharedControlPlane(url,FileBlobBackend(root/'blobs'));b=SharedControlPlane(url,FileBlobBackend(root/'blobs'))
+   try:
+    jid=a.agent_store.create(AgentSpec('r','11'*32,'expire',('repo.read',),max_seconds=30))
+    def expire(spec,workspace):
+     with b.engine.begin() as c:c.execute(__import__('sqlalchemy').text('UPDATE cp_agent_jobs SET lease_until=:t, deadline_at=:t WHERE id=:id'),{'t':int(time.time())-1,'id':jid})
+     return {'late':True}
+    with self.assertRaisesRegex(AgentError,'expired or not owned'):a.agent_store.run(jid,CallbackAgentRuntime(expire),root,finalize=False,worker_id='w')
+    row=b.agent_store.get(jid);self.assertEqual(row['status'],'running');self.assertIsNone(row['result'])
+   finally:a.close();b.close()
