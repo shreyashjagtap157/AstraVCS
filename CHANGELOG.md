@@ -1,3 +1,10 @@
+## 0.32.0 - Checked-in backward compatibility artifacts
+
+- Added a checked-in bootstrap Repository Format 0 artifact and a real legacy `astravcs-bundle-v1` archive as release-compatibility fixtures.
+- Added `tools/check_backward_compat.py` to verify Format 0 open/migration identity preservation and legacy bundle-v1 restore against those artifacts.
+- Wired backward-compatibility artifacts into the standard validation gate so future releases cannot silently strand supported old repositories or bundles.
+- Confirmed there is no connected GitHub AstraVCS repository available for remote synchronization; durable local Git bundles remain the recovery/export path.
+
 ## 0.31.0 - Explicit compatibility negotiation
 
 - Added a typed compatibility descriptor covering API, repository, portable-bundle, semantic-schema, and synchronization-protocol versions.

@@ -9,6 +9,7 @@ def main():
  run([sys.executable,'-m','compileall','-q','reference','conformance','tests/reference'])
  run(['git','diff','--check'])
  run([sys.executable,'tools/check_versions.py'])
+ run([sys.executable,'tools/check_backward_compat.py'])
  for d in ['apps/web','apps/desktop','sdk/typescript']:run(['npx','--yes','tsc','--noEmit'],ROOT/d)
  if shutil.which('go'):run(['go','test','./...'],ROOT/'sdk/go')
  if shutil.which('javac'):
