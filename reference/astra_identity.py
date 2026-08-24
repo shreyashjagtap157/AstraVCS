@@ -97,6 +97,13 @@ class OrganizationStore:
    if not matched:continue
    top=max(x['priority'] for x in matched);out.update((x['subject_kind'],x['subject']) for x in matched if x['priority']==top)
   return tuple(sorted(out))
+ def owner_groups_for_paths(self,repo,paths):
+  rules=self.list_path_owners(repo);groups=[]
+  for path in paths:
+   text=path.decode('utf-8','surrogateescape');matched=[x for x in rules if fnmatch.fnmatchcase(text,x['pattern'])]
+   if not matched:continue
+   top=max(x['priority'] for x in matched);owners=tuple(sorted((x['subject_kind'],x['subject']) for x in matched if x['priority']==top));groups.append((path,owners))
+  return tuple(groups)
  def grants_for(self,principal,repo):
   role=self.effective_role(principal,repo)
   if role is None:return ()

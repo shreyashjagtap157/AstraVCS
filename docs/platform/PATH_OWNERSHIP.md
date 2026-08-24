@@ -7,3 +7,9 @@ For each changed path, matching rules are evaluated deterministically. Only rule
 Ownership rules are stored through both the local identity database and the shared SQL control plane. Hosted APIs require repository read access to inspect rules/recommendations and repository write access to mutate rules.
 
 The current milestone exposes recommendations rather than silently mutating proposal reviewer requests. This avoids retaining obsolete automatic requests when a proposal source changes; a future automatic synchronization mode must track automatic-vs-manual request provenance explicitly before it can safely remove no-longer-applicable owners.
+
+## Required code-owner review
+
+A protected-ref policy may enable `require_code_owner_reviews`. For every changed path with an ownership rule, at least one owner in the highest-priority owner set for that path must have a current-source `approved` review. Principal owners match directly. Team owners are satisfied only by reviewers who are current members of that organization team for the repository. Unowned paths do not add an approval requirement.
+
+Evaluation occurs in the hosted merge transaction after ordinary review/check/thread/request policy validation and before the target ref is advanced. Because review evidence is already Revision-scoped, a proposal source refresh invalidates stale code-owner approvals automatically.

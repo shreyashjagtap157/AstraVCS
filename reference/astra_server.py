@@ -73,6 +73,19 @@ class AstraServer:
      target=repo.get(ObjectType.REVISION,proposal['target_revision']);target_tree=repo.get(ObjectType.TREE,target.tree_id).as_dict()
     def sig(e):return None if e is None else (e.node_id,e.kind,e.mode,e.content_id,e.derived_from)
     return tuple(sorted(path for path in set(source_tree)|set(target_tree) if sig(source_tree.get(path))!=sig(target_tree.get(path))))
+   def _require_code_owner_reviews(self,name,pid,policy):
+    if not getattr(policy,'require_code_owner_reviews',False):return
+    paths=self._proposal_changed_paths(name,pid);groups=outer.identity.owner_groups_for_paths(name,paths);evidence=outer.platform.policy_evidence(pid);latest={}
+    for review in evidence['reviews']:latest[review['reviewer']]=review['state']
+    approved={reviewer for reviewer,state in latest.items() if state=='approved'};team_cache={reviewer:set(outer.identity.team_ids_for_principal(reviewer,name)) for reviewer in approved}
+    missing=[]
+    for path,owners in groups:
+     ok=False
+     for kind,subject in owners:
+      if kind=='principal' and subject in approved:ok=True;break
+      if kind=='team' and any(subject in team_cache.get(reviewer,set()) for reviewer in approved):ok=True;break
+     if not ok:missing.append(path)
+    if missing:raise ValueError('code-owner approval missing for '+','.join(x.hex() for x in missing))
    def do_GET(self):
     try:
      p=self._parts()
@@ -187,7 +200,7 @@ class AstraServer:
       if outer.plugin_catalog is None:raise ValueError('plugin catalog is not configured')
       entry=outer.plugin_catalog.get(body['plugin_id'],body['version']);m=PluginManifest(entry['plugin_id'],entry['version'],entry['execution_model'],tuple(entry.get('requested_capabilities',[])),entry.get('entrypoint',''));secret=outer.plugins.install(m,tuple(body.get('granted_capabilities',[])));return self._json(201,{'plugin':outer.plugins.installed(m.plugin_id),'secret':secret,'catalog_digest':entry.get('digest')})
      if p==['v1','policies','upsert']:
-      principal=self._require('policies.write');policy=RefPolicy(body['pattern'],body.get('required_capability','refs.protected.write'),int(body.get('required_reviews',0)),tuple(body.get('required_checks',[])),bool(body.get('require_resolved_threads',False)),bool(body.get('require_requested_reviewers',False)));row=outer.policy.upsert(policy,priority=int(body.get('priority',0)));outer.platform.emit('policy.updated',None,principal.principal_id,{'pattern':policy.pattern});return self._json(200,{'policy':row})
+      principal=self._require('policies.write');policy=RefPolicy(body['pattern'],body.get('required_capability','refs.protected.write'),int(body.get('required_reviews',0)),tuple(body.get('required_checks',[])),bool(body.get('require_resolved_threads',False)),bool(body.get('require_requested_reviewers',False)),bool(body.get('require_code_owner_reviews',False)));row=outer.policy.upsert(policy,priority=int(body.get('priority',0)));outer.platform.emit('policy.updated',None,principal.principal_id,{'pattern':policy.pattern});return self._json(200,{'policy':row})
      if p==['v1','policies','delete']:
       principal=self._require('policies.write');outer.policy.delete(body['pattern']);outer.platform.emit('policy.deleted',None,principal.principal_id,{'pattern':body['pattern']});return self._json(200,{'ok':True})
      if p==['v1','plugins']:
@@ -282,7 +295,7 @@ class AstraServer:
        principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')
        ref=proposal['target_ref'].encode();self._require(outer.policy.required_capability(ref),name);policy=outer.policy.policy_for(ref)
-       if policy:outer.platform.require_policy(p[4],policy)
+       if policy:outer.platform.require_policy(p[4],policy);self._require_code_owner_reviews(name,p[4],policy)
        view=repo.current_view();refs=dict(view.refs);current=refs.get(ref)
        if current!=proposal['target_revision']:raise ValueError('proposal target advanced; rebase or refresh required')
        if current is None:merged=proposal['source_revision']

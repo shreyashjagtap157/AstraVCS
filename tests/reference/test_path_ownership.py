@@ -5,7 +5,7 @@ from astra_identity import OrganizationStore
 from astra_shared_control import SharedControlPlane
 from astra_backend import FileBlobBackend
 from astra_server import AstraServer,RepositoryRegistry
-from astra_security import TokenStore,Principal,Grant
+from astra_security import TokenStore,Principal,Grant,RefPolicy
 from astra_local import LocalWorkspace
 
 class PathOwnershipTests(unittest.TestCase):
@@ -35,6 +35,24 @@ class PathOwnershipTests(unittest.TestCase):
      data=None if body is None else json.dumps(body).encode();q=urllib.request.Request(f'http://{addr[0]}:{addr[1]}{path}',data=data,headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'});return json.loads(urllib.request.urlopen(q).read())
     out=req(f'/v1/repos/r/proposals/{pid}/recommended-reviewers');self.assertEqual(set(out['teams']),{'core'});self.assertEqual(set(out['reviewers']),{'docs'});self.assertEqual({bytes.fromhex(x) for x in out['paths_hex']},{b'src/a.py',b'docs/x.md'})
     rules=req('/v1/repos/r/owners');self.assertEqual(len(rules['owners']),2);req('/v1/repos/r/owners',{'action':'upsert','pattern':'tests/**','subject_kind':'principal','subject':'qa','priority':1});self.assertEqual(len(req('/v1/repos/r/owners')['owners']),3)
+   finally:srv.close();tokens.close();identity.close()
+
+
+ def test_code_owner_review_blocks_protected_merge_until_team_approval(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'src').mkdir();(repo.worktree/'src/a.py').write_text('base\n');base=w.commit(b'base').revision_id;w.create_branch(b'feature',base);w.switch_branch(b'feature',force=True);(repo.worktree/'src/a.py').write_text('feature\n');source=w.commit(b'feature').revision_id;w.switch_branch(b'main',force=True)
+   tokens=TokenStore(root/'tok.db');identity=OrganizationStore(root/'i.db');srv=AstraServer(root/'srv',registry=registry,tokens=tokens,identity=identity)
+   try:
+    org=identity.create_org('O');identity.bind_repo('r',org.org_id);team=identity.create_team(org.org_id,'core');identity.add_team_member(team,'alice');identity.upsert_path_owner('r','src/**','team',team,10);srv.policy.upsert(RefPolicy('refs/heads/main','refs.protected.write',require_code_owner_reviews=True),priority=10);pid=srv.platform.open_proposal('r','refs/heads/main',source,'author',base)
+    alice=tokens.issue(Principal('alice','human'),[Grant('reviews.write','r')],None);merger=tokens.issue(Principal('merge','human'),[Grant('proposals.merge','r'),Grant('refs.protected.write','r')],None);addr=srv.serve()
+    def req(tok,path,body=None,expect_error=False):
+     data=None if body is None else json.dumps(body).encode();q=urllib.request.Request(f'http://{addr[0]}:{addr[1]}{path}',data=data,headers={'Authorization':'Bearer '+tok,'Content-Type':'application/json'})
+     try:
+      with urllib.request.urlopen(q) as response:return json.loads(response.read())
+     except __import__('urllib').error.HTTPError as e:
+      if not expect_error:raise
+      return json.loads(e.read())
+    self.assertIn('code-owner approval missing',req(merger,f'/v1/repos/r/proposals/{pid}/merge',{},True)['error']);req(alice,f'/v1/repos/r/proposals/{pid}/reviews',{'state':'approved'});merged=req(merger,f'/v1/repos/r/proposals/{pid}/merge',{})['revision'];self.assertEqual(dict(repo.current_view().refs)[b'refs/heads/main'],merged)
    finally:srv.close();tokens.close();identity.close()
 
 if __name__=='__main__':unittest.main()

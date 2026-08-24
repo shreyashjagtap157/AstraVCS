@@ -1,3 +1,10 @@
+## 0.44.0 - Required code-owner review policy
+
+- Added the backward-compatible `require_code_owner_reviews` protected-ref policy flag.
+- Enforced code-owner approval per owned changed path using exact target/source Revision Trees and revision-scoped review evidence.
+- Accepted approvals from directly owning principals or current members of owning organization teams; stale approvals after proposal refresh remain invalid.
+- Added policy-store migration, hosted merge enforcement, web policy typing, and protected-merge regression coverage.
+
 ## 0.43.0 - Path ownership and reviewer recommendations
 
 - Added durable repository path-ownership rules for principal/team subjects in local and shared SQL identity stores.

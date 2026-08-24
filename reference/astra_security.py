@@ -34,7 +34,7 @@ class TokenStore:
 
 @dataclass(frozen=True)
 class RefPolicy:
- pattern:str='refs/heads/main'; required_capability:str='refs.protected.write'; required_reviews:int=0; required_checks:tuple[str,...]=(); require_resolved_threads:bool=False; require_requested_reviewers:bool=False
+ pattern:str='refs/heads/main'; required_capability:str='refs.protected.write'; required_reviews:int=0; required_checks:tuple[str,...]=(); require_resolved_threads:bool=False; require_requested_reviewers:bool=False; require_code_owner_reviews:bool=False
 class PolicyEngine:
  def __init__(self,policies=()):self.policies=tuple(policies)
  def policy_for(self,ref:bytes):
