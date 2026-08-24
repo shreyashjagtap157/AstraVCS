@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.49.0`
+`v0.50.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.49.0` hardens proposal revision evolution after the Repository Format 1 and self-hosting milestones. Proposal source refresh now enforces expected-source compare-and-swap in the database transaction itself across local and shared SQL stores. Revision-scoped reviews/checks, inline review threads, requested/code-owner review policy, draft lifecycle, deterministic review decisions, and structured mergeability remain integrated; concurrent HA refreshes from the same expected source admit one winner and stale writers fail closed.
+`v0.50.0` adds bounded, cursor-based pagination to proposals, issues, and platform events and corrects proposal-list authorization to require proposal-read permission. The prior atomic proposal-source CAS, revision-scoped evidence, inline review threads, review policy, structured mergeability, Repository Format 1, compatibility, and self-hosting work remain integrated.
 
 ## Validation available in this environment
 

@@ -16,8 +16,12 @@ class AstraClient:
  def create_agent_job(self,repo,input_revision,task,capabilities=('changes.create','proposals.create'),network_policy='deny',max_seconds=900):return self._request('POST',f'/v1/repos/{repo}/agents',{'input_revision':input_revision,'task':task,'capabilities':list(capabilities),'network_policy':network_policy,'max_seconds':max_seconds})
  def agent_job(self,job_id):return self._request('GET',f'/v1/agents/{job_id}')['job']
 
- def issues(self,repo,state='open'):return self._request('GET',f'/v1/repos/{repo}/issues?state={state}')['issues']
+ def issues_page(self,repo,state='open',limit=100,after=0):return self._request('GET',f'/v1/repos/{repo}/issues?state={state}&limit={limit}&after={after}')
+ def issues(self,repo,state='open'):return self.issues_page(repo,state)['issues']
  def create_issue(self,repo,title,body=''):return self._request('POST',f'/v1/repos/{repo}/issues',{'title':title,'body':body})
  def issue(self,repo,issue_id):return self._request('GET',f'/v1/repos/{repo}/issues/{issue_id}')
  def comment_issue(self,repo,issue_id,body):return self._request('POST',f'/v1/repos/{repo}/issues/{issue_id}/comments',{'body':body})
  def close_issue(self,repo,issue_id):return self._request('POST',f'/v1/repos/{repo}/issues/{issue_id}/close',{})
+ def proposals_page(self,repo,limit=100,cursor=None,status='open'):
+  path=f'/v1/repos/{repo}/proposals?limit={limit}&status={status}';return self._request('GET',path+(f'&cursor={cursor}' if cursor else ''))
+ def events_page(self,limit=100,after=0):return self._request('GET',f'/v1/events?limit={limit}&after={after}')

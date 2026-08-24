@@ -38,6 +38,9 @@ class CollaborationStore:
   r=self.db.execute('SELECT * FROM proposals WHERE id=?',(pid,)).fetchone();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   return [dict(x) for x in self.db.execute('SELECT * FROM proposals WHERE repo=? AND status=? ORDER BY created_at,id',(repo,status))]
+ def list_proposals_page(self,repo,status='open',after_created=-1,after_id='',limit=100):
+  if limit<1 or limit>100:raise PlatformError('limit must be between 1 and 100')
+  return [dict(x) for x in self.db.execute('SELECT * FROM proposals WHERE repo=? AND status=? AND (created_at>? OR (created_at=? AND id>?)) ORDER BY created_at,id LIMIT ?',(repo,status,after_created,after_created,after_id,limit))]
  def set_proposal_draft(self,pid,actor,draft):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
@@ -159,6 +162,9 @@ class CollaborationStore:
   r=self.db.execute('SELECT * FROM issues WHERE id=?',(iid,)).fetchone();return None if r is None else dict(r)
  def list_issues(self,repo,state='open'):
   return [dict(x) for x in self.db.execute('SELECT * FROM issues WHERE repo=? AND state=? ORDER BY created_at,id',(repo,state))]
+ def list_issues_page(self,repo,state='open',after=0,limit=100):
+  if limit<1 or limit>100:raise PlatformError('limit must be between 1 and 100')
+  return [dict(x) for x in self.db.execute('SELECT * FROM issues WHERE repo=? AND state=? AND id>? ORDER BY id LIMIT ?',(repo,state,after,limit))]
  def add_issue_comment(self,iid,author,body):
   if not body:raise PlatformError('issue comment must not be empty')
   issue=self.get_issue(iid)

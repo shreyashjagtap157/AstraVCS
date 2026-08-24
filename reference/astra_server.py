@@ -3,7 +3,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs
-import json,re,threading,tempfile,uuid
+import base64,json,re,threading,tempfile,uuid
 from astra_codec import ObjectType
 from astra_model import RepositoryView,validate_object_id
 from astra_repository import AstraRepository
@@ -65,6 +65,17 @@ class AstraServer:
      if res!='*' and any((g.capability==cap or g.capability=='*') and g.resource==res for g in outer.identity.grants_for(principal.principal_id,res)):return principal
      raise
    def _parts(self):return [x for x in urlparse(self.path).path.split('/') if x]
+   def _page_limit(self,q):
+    limit=int(q.get('limit',['100'])[0])
+    if limit<1 or limit>100:raise ValueError('limit must be between 1 and 100')
+    return limit
+   def _proposal_cursor(self,value):
+    if not value:return -1,''
+    try:
+     raw=base64.urlsafe_b64decode(value+'='*(-len(value)%4));d=json.loads(raw);return int(d['created_at']),str(d['id'])
+    except Exception as exc:raise ValueError('invalid proposal cursor') from exc
+   def _encode_proposal_cursor(self,row):
+    raw=json.dumps({'created_at':row['created_at'],'id':row['id']},sort_keys=True,separators=(',',':')).encode();return base64.urlsafe_b64encode(raw).decode().rstrip('=')
    def _proposal_changed_paths(self,name,pid):
     proposal=outer.platform.get_proposal(pid)
     if not proposal or proposal['repo']!=name:raise ValueError('proposal not found')
@@ -133,7 +144,7 @@ class AstraServer:
      if len(p)>=3 and p[:2]==['v1','repos']:
       name=p[2]
       if p[3:]==['issues']:
-       self._require('issues.read',name);state=parse_qs(urlparse(self.path).query).get('state',['open'])[0];return self._json(200,{'issues':outer.platform.list_issues(name,state)})
+       self._require('issues.read',name);q=parse_qs(urlparse(self.path).query);state=q.get('state',['open'])[0];limit=self._page_limit(q);after=int(q.get('after',['0'])[0]);rows=outer.platform.list_issues_page(name,state,after,limit);return self._json(200,{'issues':rows,'next_after':rows[-1]['id'] if len(rows)==limit else None})
       if len(p)==5 and p[3]=='issues':
        self._require('issues.read',name);issue=outer.platform.get_issue(int(p[4]))
        if not issue or issue['repo']!=name:return self._json(404,{'error':'issue_not_found'})
@@ -142,6 +153,8 @@ class AstraServer:
        self._require('orgs.read');return self._json(200,{'binding':outer.identity.repo_binding(name)})
       if p[3:]==['owners']:
        self._require('repo.read',name);return self._json(200,{'owners':outer.identity.list_path_owners(name)})
+      if p[3:]==['proposals']:
+       self._require('proposals.read',name);q=parse_qs(urlparse(self.path).query);status=q.get('status',['open'])[0];limit=self._page_limit(q);created,cursor_id=self._proposal_cursor(q.get('cursor',[''])[0]);rows=outer.platform.list_proposals_page(name,status,created,cursor_id,limit);return self._json(200,{'proposals':rows,'next_cursor':self._encode_proposal_cursor(rows[-1]) if len(rows)==limit else None})
       if len(p)==6 and p[3]=='proposals' and p[5]=='recommended-reviewers':
        self._require('proposals.read',name);paths=self._proposal_changed_paths(name,p[4]);owners=outer.identity.owners_for_paths(name,paths);return self._json(200,{'paths_hex':[x.hex() for x in paths],'reviewers':[s for k,s in owners if k=='principal'],'teams':[s for k,s in owners if k=='team']})
       if len(p)==6 and p[3]=='proposals' and p[5]=='mergeability':
@@ -181,7 +194,6 @@ class AstraServer:
         if kind not in types:raise ValueError('unsupported sync object kind')
         raw=encode_semantic(repo.get(types[kind],oid)).encode()
        self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
-      if p[3:]==['proposals']:return self._json(200,{'proposals':outer.platform.list_proposals(name)})
       if p[3:]==['search']:
        q=parse_qs(urlparse(self.path).query);query=q.get('q',[''])[0];revision=q.get('revision',[None])[0];idx=SearchIndex(repo)
        try:
@@ -195,7 +207,7 @@ class AstraServer:
      if len(p)==3 and p[:2]==['v1','workspaces']:
       self._require('workspaces.read');m=outer.workspaces.get(p[2]);return self._json(200,m.canonical()|{'id':m.manifest_id})
      if p==['v1','events']:
-      self._require('events.read');q=parse_qs(urlparse(self.path).query);return self._json(200,{'events':outer.platform.events(int(q.get('after',['0'])[0]))})
+      self._require('events.read');q=parse_qs(urlparse(self.path).query);limit=self._page_limit(q);rows=outer.platform.events(int(q.get('after',['0'])[0]),limit);return self._json(200,{'events':rows,'next_after':rows[-1]['seq'] if len(rows)==limit else None})
      return self._json(404,{'error':'not_found'})
     except (AuthenticationError,AuthorizationError) as e:return self._json(403,{'error':str(e)})
     except Exception as e:return self._json(400,{'error':str(e)})

@@ -1,3 +1,11 @@
+## 0.50.0 - Stable API pagination
+
+- Added bounded cursor pagination for proposals, issues, and platform events without removing the existing collection fields.
+- Added opaque stable proposal cursors over `(created_at,id)` and monotonic ID/sequence cursors for issues and events.
+- Enforced a maximum page size of 100 and fail-closed malformed proposal cursors.
+- Corrected proposal-list authorization so listing proposals requires `proposals.read` rather than falling through to generic repository-read permission.
+- Added typed TypeScript pagination plus Python SDK page helpers and local/shared SQL regression coverage.
+
 ## 0.49.0 - Atomic proposal source refresh
 
 - Fixed proposal-source compare-and-swap so the expected previous RevisionID is enforced by the database update itself rather than by a race-prone read-then-write sequence.

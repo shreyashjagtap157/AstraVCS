@@ -201,6 +201,10 @@ class SQLCollaborationStore:
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.proposals).where(self.cp.proposals.c.id==pid)).mappings().first();return None if r is None else dict(r)
  def list_proposals(self,repo,status='open'):
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.proposals).where(and_(self.cp.proposals.c.repo==repo,self.cp.proposals.c.status==status)).order_by(self.cp.proposals.c.created_at,self.cp.proposals.c.id)).mappings()]
+ def list_proposals_page(self,repo,status='open',after_created=-1,after_id='',limit=100):
+  if limit<1 or limit>100:raise PlatformError('limit must be between 1 and 100')
+  cond=and_(self.cp.proposals.c.repo==repo,self.cp.proposals.c.status==status,or_(self.cp.proposals.c.created_at>after_created,and_(self.cp.proposals.c.created_at==after_created,self.cp.proposals.c.id>after_id)))
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.proposals).where(cond).order_by(self.cp.proposals.c.created_at,self.cp.proposals.c.id).limit(limit)).mappings()]
  def set_proposal_draft(self,pid,actor,draft):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
@@ -341,6 +345,10 @@ class SQLCollaborationStore:
   with self.cp.engine.connect() as c:r=c.execute(select(self.cp.issues).where(self.cp.issues.c.id==iid)).mappings().first();return None if r is None else dict(r)
  def list_issues(self,repo,state='open'):
   with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.issues).where(and_(self.cp.issues.c.repo==repo,self.cp.issues.c.state==state)).order_by(self.cp.issues.c.created_at,self.cp.issues.c.id)).mappings()]
+ def list_issues_page(self,repo,state='open',after=0,limit=100):
+  if limit<1 or limit>100:raise PlatformError('limit must be between 1 and 100')
+  cond=and_(self.cp.issues.c.repo==repo,self.cp.issues.c.state==state,self.cp.issues.c.id>after)
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.issues).where(cond).order_by(self.cp.issues.c.id).limit(limit)).mappings()]
  def add_issue_comment(self,iid,author,body):
   if not body:raise PlatformError('issue comment must not be empty')
   issue=self.get_issue(iid)

@@ -29,14 +29,15 @@ export class AstraApi {
   setRepositoryRole(repo:string,subjectKind:'principal'|'team',subject:string,role:string):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/roles`,{method:'POST',body:JSON.stringify({subject_kind:subjectKind,subject,role})})}
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
-  proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}
+  proposals(repo:string,limit=100,cursor?:string,status='open'):Promise<{proposals:Proposal[];next_cursor:string|null}>{const q=new URLSearchParams({limit:String(limit),status});if(cursor)q.set('cursor',cursor);return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals?${q}`)}
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
   createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
 
-  issues(repo:string,state='open'):Promise<{issues:Issue[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues?state=${encodeURIComponent(state)}`)}
+  issues(repo:string,state='open',limit=100,after=0):Promise<{issues:Issue[];next_after:number|null}>{const q=new URLSearchParams({state,limit:String(limit),after:String(after)});return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues?${q}`)}
   createIssue(repo:string,title:string,body=''):Promise<{id:number}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues`,{method:'POST',body:JSON.stringify({title,body})})}
   issue(repo:string,id:number):Promise<{issue:Issue;comments:IssueComment[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues/${id}`)}
   commentIssue(repo:string,id:number,body:string):Promise<{id:number}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues/${id}/comments`,{method:'POST',body:JSON.stringify({body})})}
   closeIssue(repo:string,id:number):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/issues/${id}/close`,{method:'POST',body:'{}'})}
+  events(limit=100,after=0):Promise<{events:Record<string,unknown>[];next_after:number|null}>{return this.request(`/v1/events?limit=${limit}&after=${after}`)}
 }
