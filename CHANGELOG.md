@@ -1,3 +1,9 @@
+## 0.48.0 - Ancestor-safe merge preview
+
+- Made merge preview explicitly handle fast-forward and already-contained ancestor relationships before entering the divergent three-way merge engine.
+- Aligned read-only proposal mergeability inspection with actual merge execution semantics for linear histories.
+- Added regression coverage for fast-forward/no-op previews and hosted fast-forward mergeability.
+
 ## 0.47.0 - Structured mergeability inspection
 
 - Added a read-only proposal mergeability endpoint that reports draft, target-advance, policy, code-owner, and merge-conflict blockers before mutation.

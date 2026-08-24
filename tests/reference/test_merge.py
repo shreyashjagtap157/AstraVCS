@@ -18,6 +18,14 @@ class MergeTests(unittest.TestCase):
  def test_modify_delete_conflicts_and_persists(self):
   with tempfile.TemporaryDirectory() as td:
    r=Path(td);repo=AstraRepository.init(r);w=LocalWorkspace(repo);(r/'a').write_text('x');base=w.commit(b'base');(r/'a').write_text('y');left=w.commit(b'mod');w.checkout(base.revision_id,ref=None,force=True);(r/'a').unlink();right=w.commit(b'del');m=MergeEngine(repo).preview(left.revision_id,right.revision_id);self.assertTrue(m.conflicts);repo.get(ObjectType.CONFLICT,m.conflicts[0])
+
+ def test_preview_fast_forward_and_already_merged_match_merge_semantics(self):
+  with tempfile.TemporaryDirectory() as td:
+   r=Path(td);repo=AstraRepository.init(r);w=LocalWorkspace(repo);(r/'a').write_text('base');base=w.commit(b'base');(r/'a').write_text('next');child=w.commit(b'child');engine=MergeEngine(repo)
+   ff=engine.preview(base.revision_id,child.revision_id,persist_conflicts=False);self.assertFalse(ff.conflicts);self.assertEqual(ff.base_revision,base.revision_id);self.assertEqual(ff.merged_tree.tree_id,repo.get(ObjectType.REVISION,child.revision_id).tree_id)
+   noop=engine.preview(child.revision_id,base.revision_id,persist_conflicts=False);self.assertFalse(noop.conflicts);self.assertEqual(noop.base_revision,base.revision_id);self.assertEqual(noop.merged_tree.tree_id,repo.get(ObjectType.REVISION,child.revision_id).tree_id)
+   self.assertEqual(engine.create_merge_revision(base.revision_id,child.revision_id),child.revision_id)
+
  def test_clean_merge_apply_has_two_parents(self):
   with tempfile.TemporaryDirectory() as td:
    r=Path(td);repo=AstraRepository.init(r);w=LocalWorkspace(repo);(r/'a').write_text('a\nb\nc\n');base=w.commit(b'base');(r/'a').write_text('A\nb\nc\n');left=w.commit(b'left');w.checkout(base.revision_id,ref=None,force=True);(r/'a').write_text('a\nb\nC\n');right=w.commit(b'right');w.checkout(left.revision_id,ref=None,force=True);oid=MergeEngine(repo).apply(w,right.revision_id);rev=repo.get(ObjectType.REVISION,oid);self.assertEqual(rev.parents,(left.revision_id,right.revision_id))

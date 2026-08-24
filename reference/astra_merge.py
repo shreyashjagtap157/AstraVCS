@@ -58,6 +58,17 @@ def _merge_text(base,left,right):
 class MergeEngine:
     def __init__(self,repo:AstraRepository):self.repo=repo
     def preview(self,left:str,right:str,*,persist_conflicts=True)->MergePreview:
+        # Ancestor cases are valid merge previews too.  Handling them before
+        # the three-way engine keeps read-only mergeability inspection aligned
+        # with create_merge_revision(): a source descended from the target is a
+        # clean fast-forward, while a source already contained by the target is
+        # an explicit no-op rather than an artificial two-parent merge.
+        if left in _ancestors(self.repo,right):
+            rr=self.repo.get(ObjectType.REVISION,right);tree=self.repo.get(ObjectType.TREE,rr.tree_id)
+            return MergePreview(left,left,right,tree,tree,())
+        if right in _ancestors(self.repo,left):
+            lr=self.repo.get(ObjectType.REVISION,left);tree=self.repo.get(ObjectType.TREE,lr.tree_id)
+            return MergePreview(right,left,right,tree,tree,())
         base=merge_base(self.repo,left,right)
         br=self.repo.get(ObjectType.REVISION,base);lr=self.repo.get(ObjectType.REVISION,left);rr=self.repo.get(ObjectType.REVISION,right)
         bt=self.repo.get(ObjectType.TREE,br.tree_id);lt=self.repo.get(ObjectType.TREE,lr.tree_id);rt=self.repo.get(ObjectType.TREE,rr.tree_id)

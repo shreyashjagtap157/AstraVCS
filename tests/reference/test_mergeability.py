@@ -19,6 +19,15 @@ class MergeabilityTests(unittest.TestCase):
     tok=tokens.issue(Principal('u','human'),[Grant('proposals.read','r'),Grant('proposals.write','r')],None);addr=srv.serve();pid=srv.platform.open_proposal('r','refs/heads/main',source,'u',base,True)
     out=self._request(addr,tok,f'/v1/repos/r/proposals/{pid}/mergeability');self.assertFalse(out['mergeable']);self.assertIn('draft',{x['type'] for x in out['blockers']});self._request(addr,tok,f'/v1/repos/r/proposals/{pid}/ready',{});self.assertTrue(self._request(addr,tok,f'/v1/repos/r/proposals/{pid}/mergeability')['mergeable'])
    finally:srv.close();tokens.close()
+
+ def test_fast_forward_source_is_reported_mergeable(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base').revision_id;w.create_branch(b'feature',base);w.switch_branch(b'feature',force=True);(repo.worktree/'x').write_text('feature');source=w.commit(b'feature').revision_id;w.switch_branch(b'main',force=True)
+   tokens=TokenStore(root/'tok.db');srv=AstraServer(root/'srv',registry=registry,tokens=tokens)
+   try:
+    tok=tokens.issue(Principal('u','human'),[Grant('proposals.read','r')],None);addr=srv.serve();pid=srv.platform.open_proposal('r','refs/heads/main',source,'u',base);out=self._request(addr,tok,f'/v1/repos/r/proposals/{pid}/mergeability');self.assertTrue(out['mergeable']);self.assertEqual(out['blockers'],[])
+   finally:srv.close();tokens.close()
+
  def test_conflict_preview_is_read_only(self):
   with tempfile.TemporaryDirectory() as td:
    root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base\n');base=w.commit(b'base').revision_id;w.create_branch(b'feature',base);w.switch_branch(b'feature',force=True);(repo.worktree/'x').write_text('feature\n');source=w.commit(b'feature').revision_id;w.switch_branch(b'main',force=True);(repo.worktree/'x').write_text('main\n');target=w.commit(b'main').revision_id
