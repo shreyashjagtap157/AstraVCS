@@ -1,3 +1,11 @@
+## 0.46.0 - Deterministic review decision policy
+
+- Made latest-review policy evaluation deterministic with explicit `(created_at,id)` ordering in local and shared SQL stores.
+- Added the backward-compatible `block_changes_requested` protected-ref policy flag.
+- Blocked merge when any reviewer's latest current-source review is `changes_requested`, even if the numeric approval threshold is otherwise met.
+- Allowed a later approval by the same reviewer to supersede their earlier change request, preserving revision-scoped review semantics.
+- Added policy migration, web typing, and local/shared regression coverage.
+
 ## 0.45.0 - Draft proposal lifecycle
 
 - Added durable draft/ready state for proposals in local SQLite and shared SQL collaboration stores with backward-compatible schema migration.

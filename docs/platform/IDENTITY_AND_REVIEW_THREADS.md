@@ -38,3 +38,7 @@ Open proposals may CAS-refresh their source Revision. Reviews and checks record 
 ## Protected-ref resolved-thread policy
 
 A protected-ref policy may set `require_resolved_threads`. When enabled, merge policy fails while any open review thread is anchored to the proposal's current source Revision. Open threads anchored to an older source Revision are historical/outdated and do not block the refreshed proposal. The flag defaults to false and existing policy databases migrate with false, preserving previous behavior.
+
+## Changes-requested policy
+
+Protected refs may enable `block_changes_requested`. Review evaluation is ordered deterministically by creation time and immutable review row ID, then collapsed to each reviewer's latest review on the proposal's current source Revision. An outstanding latest `changes_requested` state blocks policy even if another reviewer supplies enough approvals; a later approval from the same reviewer supersedes that earlier state.

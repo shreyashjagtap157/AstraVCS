@@ -304,11 +304,12 @@ class SQLCollaborationStore:
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
   with self.cp.engine.connect() as c:
-   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(and_(self.cp.reviews.c.proposal_id==pid,self.cp.reviews.c.source_revision==p['source_revision']))).mappings()];checks={x['name']:dict(x) for x in c.execute(select(self.cp.checks).where(and_(self.cp.checks.c.proposal_id==pid,self.cp.checks.c.source_revision==p['source_revision']))).mappings()}
+   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(and_(self.cp.reviews.c.proposal_id==pid,self.cp.reviews.c.source_revision==p['source_revision'])).order_by(self.cp.reviews.c.created_at,self.cp.reviews.c.id)).mappings()];checks={x['name']:dict(x) for x in c.execute(select(self.cp.checks).where(and_(self.cp.checks.c.proposal_id==pid,self.cp.checks.c.source_revision==p['source_revision']))).mappings()}
   return {'reviews':reviews,'checks':checks}
  def require_policy(self,pid,policy):
   evidence=self.policy_evidence(pid);latest={}
   for r in evidence['reviews']:latest[r['reviewer']]=r['state']
+  if getattr(policy,'block_changes_requested',False) and any(state=='changes_requested' for state in latest.values()):raise PlatformError('proposal has outstanding changes requested')
   approvals=sum(1 for state in latest.values() if state=='approved')
   if approvals<policy.required_reviews:raise PlatformError(f'proposal requires {policy.required_reviews} approvals; has {approvals}')
   for name in policy.required_checks:

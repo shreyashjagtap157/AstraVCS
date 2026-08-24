@@ -123,12 +123,13 @@ class CollaborationStore:
  def policy_evidence(self,pid):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
-  reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))]
+  reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=? AND source_revision=? ORDER BY created_at,id',(pid,p['source_revision']))]
   checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM checks WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))}
   return {'reviews':reviews,'checks':checks}
  def require_policy(self,pid,policy):
   evidence=self.policy_evidence(pid);latest={}
   for r in evidence['reviews']:latest[r['reviewer']]=r['state']
+  if getattr(policy,'block_changes_requested',False) and any(state=='changes_requested' for state in latest.values()):raise PlatformError('proposal has outstanding changes requested')
   approvals=sum(1 for state in latest.values() if state=='approved')
   if approvals<policy.required_reviews:raise PlatformError(f'proposal requires {policy.required_reviews} approvals; has {approvals}')
   for name in policy.required_checks:
