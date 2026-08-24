@@ -159,6 +159,14 @@ class AstraServer:
        self._require('proposals.read',name);paths=self._proposal_changed_paths(name,p[4]);owners=outer.identity.owners_for_paths(name,paths);return self._json(200,{'paths_hex':[x.hex() for x in paths],'reviewers':[s for k,s in owners if k=='principal'],'teams':[s for k,s in owners if k=='team']})
       if len(p)==6 and p[3]=='proposals' and p[5]=='mergeability':
        self._require('proposals.read',name);return self._json(200,self._proposal_mergeability(name,p[4]))
+      if len(p)==6 and p[3]=='proposals' and p[5]=='evidence':
+       self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       q=parse_qs(urlparse(self.path).query);scope=q.get('scope',['current'])[0]
+       if scope not in ('current','all'):raise ValueError('invalid evidence scope')
+       evidence=outer.platform.policy_evidence(p[4]) if scope=='current' else outer.platform.evidence_history(p[4])
+       checks=list(evidence['checks'].values()) if isinstance(evidence['checks'],dict) else evidence['checks']
+       return self._json(200,{'proposal_id':p[4],'source_revision':proposal['source_revision'],'scope':scope,'reviews':evidence['reviews'],'checks':checks})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviewers':
        self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -305,7 +313,9 @@ class AstraServer:
        rows=outer.platform.request_reviewers(p[4],principal.principal_id,principals,teams) if p[5]=='request-reviewers' else outer.platform.remove_requested_reviewers(p[4],principal.principal_id,principals,teams)
        return self._json(200,{'reviewers':rows})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviews':
-       principal=self._require('reviews.write',name);teams=outer.identity.team_ids_for_principal(principal.principal_id,name) if hasattr(outer.identity,'team_ids_for_principal') else ();outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''),teams);return self._json(201,{'ok':True})
+       principal=self._require('reviews.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       teams=outer.identity.team_ids_for_principal(principal.principal_id,name) if hasattr(outer.identity,'team_ids_for_principal') else ();outer.platform.add_review(p[4],principal.principal_id,body['state'],body.get('body',''),teams);return self._json(201,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='threads':
        principal=self._require('reviews.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -327,7 +337,9 @@ class AstraServer:
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'review_thread_not_found'})
        row=outer.platform.resolve_review_thread(p[4],principal.principal_id,p[5]=='resolve');return self._json(200,{'thread':row})
       if len(p)==6 and p[3]=='proposals' and p[5]=='checks':
-       self._require('checks.write',name);outer.platform.set_check(p[4],body['name'],body['status'],body.get('conclusion'),body.get('details',''));return self._json(200,{'ok':True})
+       self._require('checks.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       outer.platform.set_check(p[4],body['name'],body['status'],body.get('conclusion'),body.get('details',''));return self._json(200,{'ok':True})
       if len(p)==6 and p[3]=='proposals' and p[5]=='merge':
        principal=self._require('proposals.merge',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name or proposal['status']!='open':raise ValueError('open proposal not found')

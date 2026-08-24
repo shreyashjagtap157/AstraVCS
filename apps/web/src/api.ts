@@ -1,5 +1,7 @@
 export interface RefRecord { refs: [string,string][]; operation_head: string|null }
 export interface RepositoryList { repositories: string[] }
+export interface ReviewEvidence { id:number; proposal_id:string; reviewer:string; state:'approved'|'changes_requested'|'commented'; body:string; created_at:number; source_revision:string }
+export interface CheckEvidence { id:number; proposal_id:string; name:string; status:string; conclusion:string|null; details:string; updated_at:number; source_revision:string }
 export interface Proposal { id:string; repo:string; target_ref:string; source_revision:string; status:string; created_by:string; created_at:number; draft:number|boolean }
 export interface Mergeability { mergeable:boolean; blockers:Array<{type:string;message:string;[key:string]:unknown}>; proposal_id?:string; source_revision?:string; current_target?:string|null; expected_target?:string|null }
 export interface ReviewThread { id:string; proposal_id:string; revision_id:string; node_id:string; path_hex:string; line_start:number|null; line_end:number|null; state:'open'|'resolved'; author:string; created_at:number; resolved_by:string|null; resolved_at:number|null; comments?:ReviewThreadComment[]; outdated?:boolean }
@@ -43,6 +45,7 @@ export class AstraApi {
   reviewThread(repo:string,threadId:string):Promise<{thread:ReviewThread;comments:ReviewThreadComment[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/review-threads/${encodeURIComponent(threadId)}`)}
   addReviewThreadComment(repo:string,threadId:string,body:string):Promise<{id:number}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/review-threads/${encodeURIComponent(threadId)}/comments`,{method:'POST',body:JSON.stringify({body})})}
   setReviewThreadResolved(repo:string,threadId:string,resolved:boolean):Promise<{thread:ReviewThread}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/review-threads/${encodeURIComponent(threadId)}/${resolved?'resolve':'reopen'}`,{method:'POST',body:'{}'})}
+  proposalEvidence(repo:string,proposalId:string,scope:'current'|'all'='current'):Promise<{proposal_id:string;source_revision:string;scope:string;reviews:ReviewEvidence[];checks:CheckEvidence[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/evidence?scope=${scope}`)}
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
   createProposal(repo:string,targetRef:string,sourceRevision:string,draft=false):Promise<{id:string;target_revision:string|null;draft:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`,{method:'POST',body:JSON.stringify({target_ref:targetRef,source_revision:sourceRevision,draft})})}
   setProposalDraft(repo:string,proposalId:string,draft:boolean):Promise<{proposal:Proposal}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/${draft?'draft':'ready'}`,{method:'POST',body:'{}'})}

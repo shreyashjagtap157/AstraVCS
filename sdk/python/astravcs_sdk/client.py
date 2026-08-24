@@ -25,3 +25,7 @@ class AstraClient:
  def proposals_page(self,repo,limit=100,cursor=None,status='open'):
   path=f'/v1/repos/{repo}/proposals?limit={limit}&status={status}';return self._request('GET',path+(f'&cursor={cursor}' if cursor else ''))
  def events_page(self,limit=100,after=0):return self._request('GET',f'/v1/events?limit={limit}&after={after}')
+
+ def proposal_evidence(self,repo,proposal_id,scope='current'):
+  if scope not in ('current','all'):raise ValueError('scope must be current or all')
+  return self._request('GET',f'/v1/repos/{repo}/proposals/{proposal_id}/evidence?scope={scope}')

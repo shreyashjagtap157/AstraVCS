@@ -13,6 +13,7 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, repo TEXT,target_ref TEXT,target_revision TEXT,source_revision TEXT,status TEXT,created_by TEXT,created_at INTEGER,draft INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS reviews(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,reviewer TEXT,state TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS checks(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT,name TEXT,status TEXT,conclusion TEXT,details TEXT,updated_at INTEGER,UNIQUE(proposal_id,name));
+  CREATE TABLE IF NOT EXISTS check_evidence(id INTEGER PRIMARY KEY AUTOINCREMENT,proposal_id TEXT NOT NULL,name TEXT NOT NULL,status TEXT,conclusion TEXT,details TEXT,updated_at INTEGER NOT NULL,source_revision TEXT NOT NULL,UNIQUE(proposal_id,name,source_revision));
   CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT,repo TEXT,actor TEXT,payload TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS issues(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT,title TEXT,body TEXT,state TEXT,created_by TEXT,created_at INTEGER,updated_at INTEGER);
   CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
@@ -28,6 +29,7 @@ class CollaborationStore:
   if 'source_revision' not in check_cols:self.db.execute('ALTER TABLE checks ADD COLUMN source_revision TEXT')
   self.db.execute('UPDATE reviews SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=reviews.proposal_id) WHERE source_revision IS NULL')
   self.db.execute('UPDATE checks SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=checks.proposal_id) WHERE source_revision IS NULL')
+  self.db.execute('INSERT OR IGNORE INTO check_evidence(proposal_id,name,status,conclusion,details,updated_at,source_revision) SELECT proposal_id,name,status,conclusion,details,updated_at,source_revision FROM checks WHERE source_revision IS NOT NULL')
   self.db.commit()
  def close(self): self.db.close()
  def emit(self,event_type,repo,actor,payload):
@@ -127,12 +129,17 @@ class CollaborationStore:
  def set_check(self,pid,name,status,conclusion=None,details=''):
   p=self.db.execute('SELECT repo,source_revision FROM proposals WHERE id=?',(pid,)).fetchone()
   if not p:raise PlatformError('proposal not found')
-  self.db.execute('INSERT INTO checks(proposal_id,name,status,conclusion,details,updated_at,source_revision) VALUES(?,?,?,?,?,?,?) ON CONFLICT(proposal_id,name) DO UPDATE SET status=excluded.status,conclusion=excluded.conclusion,details=excluded.details,updated_at=excluded.updated_at,source_revision=excluded.source_revision',(pid,name,status,conclusion,details,int(time.time()),p['source_revision']));self.db.commit();self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion})
+  self.db.execute('INSERT INTO check_evidence(proposal_id,name,status,conclusion,details,updated_at,source_revision) VALUES(?,?,?,?,?,?,?) ON CONFLICT(proposal_id,name,source_revision) DO UPDATE SET status=excluded.status,conclusion=excluded.conclusion,details=excluded.details,updated_at=excluded.updated_at',(pid,name,status,conclusion,details,int(time.time()),p['source_revision']));self.db.commit();self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion,'source_revision':p['source_revision']})
  def policy_evidence(self,pid):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
   reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=? AND source_revision=? ORDER BY created_at,id',(pid,p['source_revision']))]
-  checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM checks WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))}
+  checks={x['name']:dict(x) for x in self.db.execute('SELECT * FROM check_evidence WHERE proposal_id=? AND source_revision=?',(pid,p['source_revision']))}
+  return {'reviews':reviews,'checks':checks}
+ def evidence_history(self,pid):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  reviews=[dict(x) for x in self.db.execute('SELECT * FROM reviews WHERE proposal_id=? ORDER BY created_at,id',(pid,))]
+  checks=[dict(x) for x in self.db.execute('SELECT * FROM check_evidence WHERE proposal_id=? ORDER BY updated_at,id',(pid,))]
   return {'reviews':reviews,'checks':checks}
  def require_policy(self,pid,policy):
   evidence=self.policy_evidence(pid);latest={}

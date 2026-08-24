@@ -31,6 +31,7 @@ class SharedControlPlane:
   self.proposals=Table('cp_proposals',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('target_ref',Text),Column('target_revision',String(64)),Column('source_revision',String(64)),Column('status',String(32)),Column('created_by',String(256)),Column('created_at',Integer),Column('draft',Integer,nullable=False,default=0))
   self.reviews=Table('cp_reviews',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('reviewer',String(256)),Column('state',String(32)),Column('body',Text),Column('created_at',Integer),Column('source_revision',String(64)))
   self.checks=Table('cp_checks',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64)),Column('name',String(256)),Column('status',String(32)),Column('conclusion',String(32)),Column('details',Text),Column('updated_at',Integer),Column('source_revision',String(64)),UniqueConstraint('proposal_id','name',name='uq_cp_check'))
+  self.check_evidence=Table('cp_check_evidence',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('proposal_id',String(64),nullable=False),Column('name',String(256),nullable=False),Column('status',String(32)),Column('conclusion',String(32)),Column('details',Text),Column('updated_at',Integer,nullable=False),Column('source_revision',String(64),nullable=False),UniqueConstraint('proposal_id','name','source_revision',name='uq_cp_check_evidence'))
   self.events_t=Table('cp_events',self.meta,Column('seq',Integer,primary_key=True,autoincrement=True),Column('type',String(128)),Column('repo',String(256)),Column('actor',String(256)),Column('payload',Text),Column('created_at',Integer))
   self.issues=Table('cp_issues',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256)),Column('title',Text),Column('body',Text),Column('state',String(32)),Column('created_by',String(256)),Column('created_at',Integer),Column('updated_at',Integer))
   self.issue_comments_t=Table('cp_issue_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('issue_id',Integer),Column('author',String(256)),Column('body',Text),Column('created_at',Integer))
@@ -58,6 +59,10 @@ class SharedControlPlane:
    if 'source_revision' not in check_cols:c.execute(text('ALTER TABLE cp_checks ADD COLUMN source_revision VARCHAR(64)'))
    c.execute(text('UPDATE cp_reviews SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_reviews.proposal_id) WHERE source_revision IS NULL'))
    c.execute(text('UPDATE cp_checks SET source_revision=(SELECT source_revision FROM cp_proposals WHERE cp_proposals.id=cp_checks.proposal_id) WHERE source_revision IS NULL'))
+   legacy=[dict(x) for x in c.execute(select(self.checks).where(self.checks.c.source_revision!=None)).mappings()]
+   for row in legacy:
+    exists=c.execute(select(self.check_evidence.c.id).where(and_(self.check_evidence.c.proposal_id==row['proposal_id'],self.check_evidence.c.name==row['name'],self.check_evidence.c.source_revision==row['source_revision']))).first()
+    if not exists:c.execute(insert(self.check_evidence).values(proposal_id=row['proposal_id'],name=row['name'],status=row['status'],conclusion=row['conclusion'],details=row['details'],updated_at=row['updated_at'],source_revision=row['source_revision']))
   self.token_store=SQLTokenStore(self);self.platform_store=SQLCollaborationStore(self);self.agent_store=SQLAgentJobStore(self);self.package_store=SQLPackageRegistry(self);self.workspace_store=SQLWorkspaceManifestStore(self);self.identity_store=SQLOrganizationStore(self);self.policy_store=SQLRefPolicyStore(url,engine=self.engine);self.policy_store.seed([__import__('astra_security').RefPolicy()]);self.plugin_store=SQLPluginRegistry(self.engine)
  def close(self):self.engine.dispose()
 
@@ -304,15 +309,22 @@ class SQLCollaborationStore:
   if not p:raise PlatformError('proposal not found')
   now=int(time.time())
   with self.cp.engine.begin() as c:
-   row=c.execute(select(self.cp.checks.c.id).where(and_(self.cp.checks.c.proposal_id==pid,self.cp.checks.c.name==name))).first()
-   if row:c.execute(update(self.cp.checks).where(self.cp.checks.c.id==row[0]).values(status=status,conclusion=conclusion,details=details,updated_at=now,source_revision=p['source_revision']))
-   else:c.execute(insert(self.cp.checks).values(proposal_id=pid,name=name,status=status,conclusion=conclusion,details=details,updated_at=now,source_revision=p['source_revision']))
-  self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion})
+   cond=and_(self.cp.check_evidence.c.proposal_id==pid,self.cp.check_evidence.c.name==name,self.cp.check_evidence.c.source_revision==p['source_revision'])
+   row=c.execute(select(self.cp.check_evidence.c.id).where(cond)).first()
+   if row:c.execute(update(self.cp.check_evidence).where(self.cp.check_evidence.c.id==row[0]).values(status=status,conclusion=conclusion,details=details,updated_at=now))
+   else:c.execute(insert(self.cp.check_evidence).values(proposal_id=pid,name=name,status=status,conclusion=conclusion,details=details,updated_at=now,source_revision=p['source_revision']))
+  self.emit('check.updated',p['repo'],'check:'+name,{'proposal_id':pid,'status':status,'conclusion':conclusion,'source_revision':p['source_revision']})
  def policy_evidence(self,pid):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
   with self.cp.engine.connect() as c:
-   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(and_(self.cp.reviews.c.proposal_id==pid,self.cp.reviews.c.source_revision==p['source_revision'])).order_by(self.cp.reviews.c.created_at,self.cp.reviews.c.id)).mappings()];checks={x['name']:dict(x) for x in c.execute(select(self.cp.checks).where(and_(self.cp.checks.c.proposal_id==pid,self.cp.checks.c.source_revision==p['source_revision']))).mappings()}
+   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(and_(self.cp.reviews.c.proposal_id==pid,self.cp.reviews.c.source_revision==p['source_revision'])).order_by(self.cp.reviews.c.created_at,self.cp.reviews.c.id)).mappings()];checks={x['name']:dict(x) for x in c.execute(select(self.cp.check_evidence).where(and_(self.cp.check_evidence.c.proposal_id==pid,self.cp.check_evidence.c.source_revision==p['source_revision']))).mappings()}
+  return {'reviews':reviews,'checks':checks}
+ def evidence_history(self,pid):
+  if not self.get_proposal(pid):raise PlatformError('proposal not found')
+  with self.cp.engine.connect() as c:
+   reviews=[dict(x) for x in c.execute(select(self.cp.reviews).where(self.cp.reviews.c.proposal_id==pid).order_by(self.cp.reviews.c.created_at,self.cp.reviews.c.id)).mappings()]
+   checks=[dict(x) for x in c.execute(select(self.cp.check_evidence).where(self.cp.check_evidence.c.proposal_id==pid).order_by(self.cp.check_evidence.c.updated_at,self.cp.check_evidence.c.id)).mappings()]
   return {'reviews':reviews,'checks':checks}
  def require_policy(self,pid,policy):
   evidence=self.policy_evidence(pid);latest={}

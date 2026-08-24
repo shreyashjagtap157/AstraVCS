@@ -1,3 +1,11 @@
+## 0.51.0 - Revision-scoped evidence hardening
+
+- Fixed check-evidence retention so a check result on a refreshed proposal source no longer overwrites evidence produced for an older RevisionID.
+- Added backward-compatible local/shared SQL migration into revision-scoped check evidence keyed by proposal, check name, and source RevisionID.
+- Added capability-gated proposal evidence reads for current or complete historical review/check evidence.
+- Fixed cross-repository confused-deputy paths for review and check writes by verifying proposal repository ownership at the HTTP boundary.
+- Added local, shared-SQL, HTTP isolation, and historical-evidence regression coverage plus typed Python/TypeScript client support.
+
 ## 0.50.0 - Stable API pagination
 
 - Added bounded cursor pagination for proposals, issues, and platform events without removing the existing collection fields.
