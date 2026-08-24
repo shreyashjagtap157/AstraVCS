@@ -1,3 +1,10 @@
+## 0.34.0 - Semantic Bundle Format 2
+
+- Introduced `astravcs-semantic-bundle-v2` for backend-neutral hosted/agent/self-host transfer, binding it to Repository Format 1 and the supported semantic-schema set.
+- Added per-entry SHA-256 inventory verification, duplicate/missing-entry rejection, semantic-ID validation, and fail-closed handling when referenced Tree content cannot be materialized.
+- Kept semantic-bundle v1 readable for backward compatibility while all new transfers emit v2.
+- Requalified hosted/local transfer, shared control-plane transfer, agents, HTTP/promised sync, Astra-only self-hosting, and deterministic soak against v2.
+
 ## 0.33.0 - Astra-only self-host continuation
 
 - Extended self-host qualification beyond Git dual-control seeding: after the first Astra restore, the gate stops consulting Git, creates/switches an Astra branch, records a new Astra revision, bundles it again, restores it again, and verifies the new content/history solely through Astra semantics.
