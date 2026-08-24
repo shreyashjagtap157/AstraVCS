@@ -4,7 +4,7 @@ AstraVCS is a clean-sheet version-control and software-development platform desi
 
 ## Current status
 
-`v0.42.0` — requested-reviewer enforcement policy milestone.
+`v0.43.0` — path ownership and reviewer recommendation milestone.
 
 The repository now contains an executable reference implementation covering the local VCS core, durable semantic/object storage, native large objects, Git import/export, NodeID-aware merge/conflicts, hosted APIs, capability security, collaboration/checks, plugins/AI/agents, SDK/client surfaces, scale indexes, cryptographic assurance, automation contracts, hosted-storage abstractions, and the `v0.10.0` safety/data-plane additions.
 

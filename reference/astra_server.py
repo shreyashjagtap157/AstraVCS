@@ -65,6 +65,14 @@ class AstraServer:
      if res!='*' and any((g.capability==cap or g.capability=='*') and g.resource==res for g in outer.identity.grants_for(principal.principal_id,res)):return principal
      raise
    def _parts(self):return [x for x in urlparse(self.path).path.split('/') if x]
+   def _proposal_changed_paths(self,name,pid):
+    proposal=outer.platform.get_proposal(pid)
+    if not proposal or proposal['repo']!=name:raise ValueError('proposal not found')
+    repo=outer.registry.open(name);source=repo.get(ObjectType.REVISION,proposal['source_revision']);source_tree=repo.get(ObjectType.TREE,source.tree_id).as_dict();target_tree={}
+    if proposal.get('target_revision'):
+     target=repo.get(ObjectType.REVISION,proposal['target_revision']);target_tree=repo.get(ObjectType.TREE,target.tree_id).as_dict()
+    def sig(e):return None if e is None else (e.node_id,e.kind,e.mode,e.content_id,e.derived_from)
+    return tuple(sorted(path for path in set(source_tree)|set(target_tree) if sig(source_tree.get(path))!=sig(target_tree.get(path))))
    def do_GET(self):
     try:
      p=self._parts()
@@ -100,6 +108,10 @@ class AstraServer:
        return self._json(200,{'issue':issue,'comments':outer.platform.issue_comments(int(p[4]))})
       if p[3:]==['organization']:
        self._require('orgs.read');return self._json(200,{'binding':outer.identity.repo_binding(name)})
+      if p[3:]==['owners']:
+       self._require('repo.read',name);return self._json(200,{'owners':outer.identity.list_path_owners(name)})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='recommended-reviewers':
+       self._require('proposals.read',name);paths=self._proposal_changed_paths(name,p[4]);owners=outer.identity.owners_for_paths(name,paths);return self._json(200,{'paths_hex':[x.hex() for x in paths],'reviewers':[s for k,s in owners if k=='principal'],'teams':[s for k,s in owners if k=='team']})
       if len(p)==6 and p[3]=='proposals' and p[5]=='reviewers':
        self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -224,6 +236,12 @@ class AstraServer:
        view=repo.current_view();refs=dict(view.refs);expected_old=body.get('expected_old')
        if expected_old is not None and refs.get(ref)!=expected_old:raise ValueError('stale ref value')
        refs[ref]=oid;repo.publish_view(RepositoryView.create(refs,dict(view.workspace_heads)),b'api-ref-update',expected_head=body.get('expected_operation_head',repo.operation_head()));outer.platform.emit('ref.updated',name,principal.principal_id,{'ref':body['ref'],'revision':oid});return self._json(200,{'ref':body['ref'],'revision':oid,'operation_head':repo.operation_head()})
+      if p[3:]==['owners']:
+       principal=self._require('repo.write',name);action=body.get('action','upsert');pattern=body['pattern'];kind=body['subject_kind'];subject=body['subject']
+       if action=='upsert':outer.identity.upsert_path_owner(name,pattern,kind,subject,int(body.get('priority',0)));outer.platform.emit('ownership.updated',name,principal.principal_id,{'pattern':pattern,'subject_kind':kind,'subject':subject,'priority':int(body.get('priority',0))})
+       elif action=='delete':outer.identity.remove_path_owner(name,pattern,kind,subject);outer.platform.emit('ownership.deleted',name,principal.principal_id,{'pattern':pattern,'subject_kind':kind,'subject':subject})
+       else:raise ValueError('invalid ownership action')
+       return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if p[3:]==['proposals']:
        principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid);return self._json(201,{'id':pid,'target_revision':target_oid})
       if len(p)==6 and p[3]=='proposals' and p[5]=='refresh':

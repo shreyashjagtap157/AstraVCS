@@ -46,6 +46,7 @@ class SharedControlPlane:
   self.team_members=Table('cp_team_members',self.meta,Column('team',String(64),primary_key=True),Column('principal',String(256),primary_key=True))
   self.repo_bindings=Table('cp_repo_bindings',self.meta,Column('repo',String(256),primary_key=True),Column('org',String(64),nullable=False),Column('visibility',String(32),nullable=False))
   self.repo_roles=Table('cp_repo_roles',self.meta,Column('repo',String(256),primary_key=True),Column('subject_kind',String(32),primary_key=True),Column('subject',String(256),primary_key=True),Column('role',String(32),nullable=False))
+  self.path_owners=Table('cp_path_owners',self.meta,Column('repo',String(256),primary_key=True),Column('pattern',String(512),primary_key=True),Column('subject_kind',String(32),primary_key=True),Column('subject',String(256),primary_key=True),Column('priority',Integer,nullable=False,default=0))
   self.meta.create_all(self.engine)
   insp=inspect(self.engine)
   review_cols={c['name'] for c in insp.get_columns('cp_reviews')}
@@ -132,6 +133,25 @@ class SQLOrganizationStore:
    if binding['visibility']=='public':roles.append('read')
   if not roles:return None
   rank={'read':0,'triage':1,'write':2,'maintain':3,'admin':4};return max(roles,key=lambda r:rank[r])
+ def upsert_path_owner(self,repo,pattern,subject_kind,subject,priority=0):
+  if not pattern or len(pattern)>512 or '\x00' in pattern:raise IdentityError('invalid ownership pattern')
+  if subject_kind not in ('principal','team') or not subject or len(subject)>256:raise IdentityError('invalid ownership subject')
+  if not isinstance(priority,int):raise IdentityError('ownership priority must be integer')
+  cond=and_(self.cp.path_owners.c.repo==repo,self.cp.path_owners.c.pattern==pattern,self.cp.path_owners.c.subject_kind==subject_kind,self.cp.path_owners.c.subject==subject)
+  with self.cp.engine.begin() as c:
+   if c.execute(select(self.cp.path_owners.c.repo).where(cond)).first():c.execute(update(self.cp.path_owners).where(cond).values(priority=priority))
+   else:c.execute(insert(self.cp.path_owners).values(repo=repo,pattern=pattern,subject_kind=subject_kind,subject=subject,priority=priority))
+ def remove_path_owner(self,repo,pattern,subject_kind,subject):
+  with self.cp.engine.begin() as c:c.execute(__import__('sqlalchemy').delete(self.cp.path_owners).where(and_(self.cp.path_owners.c.repo==repo,self.cp.path_owners.c.pattern==pattern,self.cp.path_owners.c.subject_kind==subject_kind,self.cp.path_owners.c.subject==subject)))
+ def list_path_owners(self,repo):
+  with self.cp.engine.connect() as c:return [dict(x) for x in c.execute(select(self.cp.path_owners).where(self.cp.path_owners.c.repo==repo).order_by(self.cp.path_owners.c.priority.desc(),self.cp.path_owners.c.pattern,self.cp.path_owners.c.subject_kind,self.cp.path_owners.c.subject)).mappings()]
+ def owners_for_paths(self,repo,paths):
+  rules=self.list_path_owners(repo);out=set()
+  for path in paths:
+   text=path.decode('utf-8','surrogateescape');matched=[x for x in rules if fnmatch.fnmatchcase(text,x['pattern'])]
+   if not matched:continue
+   top=max(x['priority'] for x in matched);out.update((x['subject_kind'],x['subject']) for x in matched if x['priority']==top)
+  return tuple(sorted(out))
  def grants_for(self,principal,repo):
   role=self.effective_role(principal,repo)
   if role is None:return ()

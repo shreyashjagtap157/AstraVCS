@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-import sqlite3,uuid
+import sqlite3,uuid,fnmatch
 from astra_security import Grant
 
 class IdentityError(RuntimeError):pass
@@ -36,6 +36,7 @@ class OrganizationStore:
   CREATE TABLE IF NOT EXISTS team_members(team TEXT NOT NULL,principal TEXT NOT NULL,PRIMARY KEY(team,principal));
   CREATE TABLE IF NOT EXISTS repo_bindings(repo TEXT PRIMARY KEY,org TEXT NOT NULL,visibility TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS repo_roles(repo TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,role TEXT NOT NULL,PRIMARY KEY(repo,subject_kind,subject));
+  CREATE TABLE IF NOT EXISTS path_owners(repo TEXT NOT NULL,pattern TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,priority INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(repo,pattern,subject_kind,subject));
   ''');self.db.commit()
  def close(self):self.db.close()
  def create_org(self,name):
@@ -82,6 +83,20 @@ class OrganizationStore:
   return tuple(x['team'] for x in self.db.execute('SELECT tm.team FROM team_members tm JOIN teams t ON t.id=tm.team WHERE tm.principal=? AND t.org=? ORDER BY tm.team',(principal,binding['org'])))
  def repo_binding(self,repo):
   r=self.db.execute('SELECT repo,org,visibility FROM repo_bindings WHERE repo=?',(repo,)).fetchone();return None if r is None else dict(r)
+ def upsert_path_owner(self,repo,pattern,subject_kind,subject,priority=0):
+  if not pattern or len(pattern)>512 or '\x00' in pattern:raise IdentityError('invalid ownership pattern')
+  if subject_kind not in ('principal','team') or not subject or len(subject)>256:raise IdentityError('invalid ownership subject')
+  if not isinstance(priority,int):raise IdentityError('ownership priority must be integer')
+  self.db.execute('INSERT INTO path_owners VALUES(?,?,?,?,?) ON CONFLICT(repo,pattern,subject_kind,subject) DO UPDATE SET priority=excluded.priority',(repo,pattern,subject_kind,subject,priority));self.db.commit()
+ def remove_path_owner(self,repo,pattern,subject_kind,subject):self.db.execute('DELETE FROM path_owners WHERE repo=? AND pattern=? AND subject_kind=? AND subject=?',(repo,pattern,subject_kind,subject));self.db.commit()
+ def list_path_owners(self,repo):return [dict(x) for x in self.db.execute('SELECT * FROM path_owners WHERE repo=? ORDER BY priority DESC,pattern,subject_kind,subject',(repo,))]
+ def owners_for_paths(self,repo,paths):
+  rules=self.list_path_owners(repo);out=set()
+  for path in paths:
+   text=path.decode('utf-8','surrogateescape');matched=[x for x in rules if fnmatch.fnmatchcase(text,x['pattern'])]
+   if not matched:continue
+   top=max(x['priority'] for x in matched);out.update((x['subject_kind'],x['subject']) for x in matched if x['priority']==top)
+  return tuple(sorted(out))
  def grants_for(self,principal,repo):
   role=self.effective_role(principal,repo)
   if role is None:return ()

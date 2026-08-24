@@ -1,3 +1,10 @@
+## 0.43.0 - Path ownership and reviewer recommendations
+
+- Added durable repository path-ownership rules for principal/team subjects in local and shared SQL identity stores.
+- Added deterministic priority semantics: only the highest-priority matching rule set applies per changed path, while equal-priority owners can coexist.
+- Added hosted ownership rule management and proposal reviewer recommendations derived from exact target/source Revision Trees.
+- Added typed web-client ownership/recommendation APIs and local/shared/HTTP regression coverage.
+
 ## 0.42.0 - Required requested-reviewer policy
 
 - Added the backward-compatible `require_requested_reviewers` protected-ref policy flag.
