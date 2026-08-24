@@ -43,3 +43,7 @@ Any validation failure aborts migration without modifying the format marker. Re-
 ## Evolution
 
 Future physical stores may coexist with or replace `loose-v1` through a separately versioned migration while semantic IDs remain unchanged. A future Repository Format 2 requires an explicit migration/compatibility decision and cannot silently redefine Format 1 objects or identities.
+
+## Independent conformance
+
+`conformance/independent_format1.py` is a second implementation of the Format 1 layout checks and imports no AstraVCS implementation modules. Checked-in fixtures under `tests/fixtures/format1/` lock the exact descriptor bytes. Release qualification exercises both the production reader/migrator and the independent verifier so accidental layout, StoreKey, or framing drift is detected before release.

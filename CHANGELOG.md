@@ -1,3 +1,9 @@
+## 0.29.0 - Format 1 independent conformance
+
+- Added an implementation-independent Repository Format 1 verifier that validates the exact format descriptor, semantic-map layout, physical loose-object StoreKeys, envelope framing, and operation-head syntax without importing AstraVCS implementation modules.
+- Added checked-in Format 1 descriptor fixtures and migration/conformance tests, including corruption rejection and bootstrap-format migration identity preservation.
+- Kept Repository Format 1 semantic identity and physical-storage boundaries explicit so future physical-store changes require separate compatibility evidence rather than silently redefining the repository contract.
+
 ## 0.28.0 - Repository Format 1
 
 - Introduced Repository Format 1 as the first stable repository-layout/state contract while preserving replaceable physical storage/index/transport implementations.
