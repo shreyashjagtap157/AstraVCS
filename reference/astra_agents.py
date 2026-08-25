@@ -12,7 +12,7 @@ import json,sqlite3,time,uuid
 class AgentError(RuntimeError):pass
 @dataclass(frozen=True)
 class AgentSpec:
- repository:str; input_revision:str; task:str; capabilities:tuple[str,...]; network_policy:str='deny'; max_seconds:int=900
+ repository:str; input_revision:str; task:str; capabilities:tuple[str,...]; network_policy:str='deny'; max_seconds:int=900; target_ref:str='refs/heads/main'
 class AgentRuntime:
  isolation_level='abstract'
  def execute(self,spec:AgentSpec,workspace:Path):raise NotImplementedError
@@ -26,14 +26,15 @@ class AgentJobStore:
  def __init__(self,path):
   self.db=sqlite3.connect(Path(path),check_same_thread=False,timeout=30);self.db.row_factory=sqlite3.Row;self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA busy_timeout=30000');self.db.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,repo TEXT,input_revision TEXT,task TEXT,capabilities TEXT,network_policy TEXT,status TEXT,result TEXT,created INTEGER,updated INTEGER)')
   cols={r[1] for r in self.db.execute('PRAGMA table_info(jobs)')}
-  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0'),('claim_generation','INTEGER NOT NULL DEFAULT 0'),('max_seconds','INTEGER NOT NULL DEFAULT 900'),('deadline_at','INTEGER')):
+  for name,decl in (('worker_id','TEXT'),('lease_until','INTEGER'),('attempts','INTEGER NOT NULL DEFAULT 0'),('claim_generation','INTEGER NOT NULL DEFAULT 0'),('max_seconds','INTEGER NOT NULL DEFAULT 900'),('deadline_at','INTEGER'),('target_ref',"TEXT NOT NULL DEFAULT 'refs/heads/main'")):
    if name not in cols:self.db.execute(f'ALTER TABLE jobs ADD COLUMN {name} {decl}')
   self.db.commit()
  def close(self):self.db.close()
  def create(self,spec):
   if spec.network_policy not in ('deny','allowlist','unrestricted'):raise AgentError('invalid network policy')
   if not 1<=int(spec.max_seconds)<=86400:raise AgentError('max_seconds must be between 1 and 86400')
-  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation,max_seconds,deadline_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0,int(spec.max_seconds),None));self.db.commit();return jid
+  if not isinstance(spec.target_ref,str) or not spec.target_ref.startswith('refs/heads/') or len(spec.target_ref)<=len('refs/heads/') or '\x00' in spec.target_ref:raise AgentError('invalid agent target_ref')
+  jid=str(uuid.uuid4());now=int(time.time());self.db.execute('INSERT INTO jobs(id,repo,input_revision,task,capabilities,network_policy,status,result,created,updated,worker_id,lease_until,attempts,claim_generation,max_seconds,deadline_at,target_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(jid,spec.repository,spec.input_revision,spec.task,json.dumps(spec.capabilities),spec.network_policy,'queued',None,now,now,None,None,0,0,int(spec.max_seconds),None,spec.target_ref));self.db.commit();return jid
  def get(self,jid):
   r=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone();return None if r is None else dict(r)
  def cancel(self,jid,*,worker_id=None,claim_generation=None,reason='cancelled'):
@@ -102,7 +103,7 @@ class AgentJobStore:
   row=self.get(jid)
   if not row:raise AgentError('job not found')
   if production and runtime.isolation_level.startswith('development'):raise AgentError('development agent runtime cannot satisfy production isolation')
-  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');claim_generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'],int(row.get('max_seconds') or 900))
+  row=self.claim(jid,worker_id=worker_id,lease_seconds=lease_seconds);claim_worker=row.pop('_claim_worker_id');claim_generation=row.pop('_claim_generation');spec=AgentSpec(row['repo'],row['input_revision'],row['task'],tuple(json.loads(row['capabilities'])),row['network_policy'],int(row.get('max_seconds') or 900),row.get('target_ref') or 'refs/heads/main')
   try:result=runtime.execute(spec,workspace)
   except Exception as exc:return self.finish(jid,'failed',{'error':str(exc)},worker_id=claim_worker,claim_generation=claim_generation)
   if finalize:return self.finish(jid,'completed',result,worker_id=claim_worker,claim_generation=claim_generation)
@@ -123,7 +124,7 @@ class MicroVMRuntime(AgentRuntime):
 class AgentCoordinator:
  """Coordinates VCS-safe agent work without granting protected-ref mutation."""
  def __init__(self,registry,platform,jobs:AgentJobStore):self.registry=registry;self.platform=platform;self.jobs=jobs
- def execute(self,jid,runtime:AgentRuntime,*,target_ref='refs/heads/main',production=False,worker_id=None):
+ def execute(self,jid,runtime:AgentRuntime,*,target_ref=None,production=False,worker_id=None):
   import tempfile,json
   from pathlib import Path
   from astra_repository import AstraRepository
@@ -134,7 +135,9 @@ class AgentCoordinator:
   caps=set(json.loads(row['capabilities']))
   for required in ('changes.create','proposals.create'):
    if required not in caps:raise AgentError(f'agent job lacks required capability {required}')
-  source=self.registry.open(row['repo']);input_revision=row['input_revision'];source.get(__import__('astra_codec').ObjectType.REVISION,input_revision)
+  source=self.registry.open(row['repo']);input_revision=row['input_revision'];bound_target=row.get('target_ref') or 'refs/heads/main'
+  if target_ref is not None and target_ref!=bound_target:raise AgentError('agent job target_ref is immutable after creation')
+  target_ref=bound_target;source.get(__import__('astra_codec').ObjectType.REVISION,input_revision)
   with tempfile.TemporaryDirectory(prefix='astra-agent-') as td,tempfile.NamedTemporaryFile(suffix='.astra') as bundle:
    create_portable_bundle(source,bundle.name);agent=AstraRepository.init(td);apply_portable_bundle(agent,bundle.name,publish_refs=True);ws=LocalWorkspace(agent);ws.checkout(input_revision,ref=None,force=True)
    # Runtime executes only inside the ephemeral worktree. Production isolation

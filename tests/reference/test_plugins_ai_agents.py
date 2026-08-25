@@ -112,6 +112,28 @@ class AgentCoordinatorTests(unittest.TestCase):
     self.assertEqual(row['status'],'needs_rebase');self.assertIn('revision',payload);self.assertEqual(platform.list_proposals('r'),[])
    finally:jobs.close();platform.close()
 
+
+ def test_agent_target_ref_is_bound_at_creation(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime,AgentError
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'edit',('changes.create','proposals.create'),target_ref='refs/heads/main'))
+    with self.assertRaisesRegex(AgentError,'immutable'):AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(lambda spec,workspace:{'ok':True}),target_ref='refs/heads/release')
+    self.assertEqual(jobs.get(jid)['status'],'queued');self.assertEqual(jobs.get(jid)['target_ref'],'refs/heads/main')
+   finally:jobs.close();platform.close()
+
+ def test_agent_target_ref_validation(self):
+  from astra_agents import AgentJobStore,AgentSpec,AgentError
+  with tempfile.TemporaryDirectory() as td:
+   jobs=AgentJobStore(Path(td)/'jobs.db')
+   try:
+    with self.assertRaisesRegex(AgentError,'target_ref'):jobs.create(AgentSpec('r','11'*32,'bad',('repo.read',),target_ref='main'))
+   finally:jobs.close()
+
 class AgentLeaseFailoverTests(unittest.TestCase):
  def test_live_lease_cannot_be_stolen_and_heartbeat_extends_it(self):
   from astra_agents import AgentJobStore,AgentSpec,AgentError

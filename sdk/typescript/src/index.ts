@@ -10,7 +10,7 @@ export interface IssueComment { id:number; issue_id:number; author:string; body:
 export interface Organization { id:string; name:string }
 export interface OrganizationMember { principal:string; role:string }
 export interface Team { id:string; name:string }
-export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
+export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; target_ref:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
   constructor(private readonly base:string, private token:string) {}
   setToken(token:string):void { this.token=token }
@@ -39,7 +39,7 @@ export class AstraApi {
   dequeueProposal(repo:string,proposalId:string):Promise<{entry:MergeQueueEntry}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/dequeue`,{method:'POST',body:'{}'})}
   processMergeQueue(repo:string,targetRef:string):Promise<{processed:boolean;proposal_id?:string;revision?:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/merge-queue/process`,{method:'POST',body:JSON.stringify({target_ref:targetRef})})}
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
-  createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
+  createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900,targetRef='refs/heads/main'):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds,target_ref:targetRef})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
   cancelAgentJob(id:string,reason='cancelled by user'):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}/cancel`,{method:'POST',body:JSON.stringify({reason})})}
 

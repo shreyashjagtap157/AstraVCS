@@ -40,7 +40,7 @@ class AstraServer:
   self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=workspaces or WorkspaceManifestStore(self.root/'workspaces');self.packages=packages or PackageRegistry(self.root/'packages');self.agent_jobs=agent_jobs or AgentJobStore(self.root/'agents.sqlite')
   self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.identity=identity or OrganizationStore(self.root/'identity.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
   self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self._owns_identity=identity is None;self._owns_policy=policy_store is None;self.policy=policy_store or SQLRefPolicyStore('sqlite:///'+str((self.root/'policies.sqlite').resolve()));self.policy.seed(policies or [RefPolicy()]) if hasattr(self.policy,'seed') else None;self.http=None;self.thread=None
- def run_agent_job(self,jid,runtime,*,target_ref='refs/heads/main',production=True):
+ def run_agent_job(self,jid,runtime,*,target_ref=None,production=True):
   return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production,worker_id=self.worker_id)
  def serve(self,host='127.0.0.1',port=0):
   outer=self
@@ -274,7 +274,10 @@ class AstraServer:
       if p[3:]==['agents']:
        principal=self._require('agents.start',name);input_revision=body['input_revision'];repo.get(ObjectType.REVISION,input_revision);caps=tuple(body.get('capabilities',('changes.create','proposals.create')))
        for cap in caps:self._require(cap,name)
-       spec=AgentSpec(name,input_revision,body['task'],caps,body.get('network_policy','deny'),int(body.get('max_seconds',900)));jid=outer.agent_jobs.create(spec);outer.platform.emit('agent.queued',name,principal.principal_id,{'job_id':jid,'input_revision':input_revision});return self._json(201,{'id':jid})
+       target_ref=body.get('target_ref','refs/heads/main');target_bytes=target_ref.encode('utf-8');current=dict(repo.current_view().refs).get(target_bytes)
+       if current is None:raise ValueError('agent target_ref does not exist')
+       if current!=input_revision:raise ValueError('agent input_revision must match target_ref at creation')
+       spec=AgentSpec(name,input_revision,body['task'],caps,body.get('network_policy','deny'),int(body.get('max_seconds',900)),target_ref);jid=outer.agent_jobs.create(spec);outer.platform.emit('agent.queued',name,principal.principal_id,{'job_id':jid,'input_revision':input_revision,'target_ref':target_ref});return self._json(201,{'id':jid})
       if p[3:]==['issues']:
        principal=self._require('issues.write',name);iid=outer.platform.create_issue(name,body['title'],body.get('body',''),principal.principal_id);return self._json(201,{'id':iid})
       if len(p)==6 and p[3]=='issues' and p[5]=='comments':

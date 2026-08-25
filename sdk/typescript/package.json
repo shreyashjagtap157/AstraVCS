@@ -1,6 +1,6 @@
 {
   "name": "@astravcs/sdk",
-  "version": "0.60.0-astra.0",
+  "version": "0.61.0-astra.0",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit"

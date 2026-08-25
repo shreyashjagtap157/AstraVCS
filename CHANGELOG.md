@@ -1,3 +1,10 @@
+## 0.61.0.0 - Immutable autonomous-agent target binding
+
+- Bound each autonomous-agent job durably to its intended proposal target ref at creation.
+- Rejected HTTP agent jobs whose input RevisionID is not the current value of the requested target ref.
+- Prevented execution operators from redirecting a queued job to a different branch after authorization.
+- Added additive SQLite/shared-SQL schema evolution, typed client support, and permanent target-binding regressions.
+
 ## 0.60.0.0 - Agent publication ownership fences
 
 - Added an explicit generation-fenced live-ownership assertion to local SQLite and shared SQL autonomous-agent stores.

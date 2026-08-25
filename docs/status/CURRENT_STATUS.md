@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.60.0.0`
+`v0.61.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.60.0.0` adds repeated generation-fenced ownership validation at autonomous-agent publication boundaries. Runtime result acceptance alone is no longer sufficient: the exact worker generation must still own a live lease immediately before repository-object import and proposal publication, with identical local SQLite and shared SQL semantics.
+`v0.61.0.0` binds autonomous-agent authorization to an immutable proposal target. The durable job records `target_ref`; HTTP creation requires the input RevisionID to equal that target’s current revision, and execution cannot redirect the job to a different branch. SQLite and shared SQL use the same additive schema and semantics.
 
 ## Validation available in this environment
 

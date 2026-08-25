@@ -19,7 +19,7 @@ export interface PlatformEvent { id:number; type:string; repo:string|null; actor
 export interface RefPolicyRecord { pattern:string; required_capability:string; required_reviews:number; required_checks:string[]; require_resolved_threads:boolean; require_requested_reviewers:boolean; require_code_owner_reviews:boolean; block_changes_requested:boolean; priority:number; updated:number }
 export interface PluginRecord { id:string; version:string; model:string; entrypoint:string; requested:string[]; granted:string[]; enabled:number; updated:number }
 export interface PluginCatalogEntry { plugin_id:string; version:string; execution_model:string; requested_capabilities:string[]; entrypoint:string; digest?:string }
-export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; status:string; result:string|null; created:number; updated:number }
+export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; target_ref:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
   constructor(private readonly base:string, private token:string) {}
   setToken(token:string):void { this.token=token }
@@ -54,7 +54,7 @@ export class AstraApi {
   createRepository(name:string):Promise<{name:string}>{return this.request('/v1/repos',{method:'POST',body:JSON.stringify({name})})}
   createProposal(repo:string,targetRef:string,sourceRevision:string,draft=false):Promise<{id:string;target_revision:string|null;draft:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`,{method:'POST',body:JSON.stringify({target_ref:targetRef,source_revision:sourceRevision,draft})})}
   setProposalDraft(repo:string,proposalId:string,draft:boolean):Promise<{proposal:Proposal}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/${draft?'draft':'ready'}`,{method:'POST',body:'{}'})}
-  createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds})})}
+  createAgentJob(repo:string,inputRevision:string,task:string,capabilities:string[]=['changes.create','proposals.create'],networkPolicy='deny',maxSeconds=900,targetRef='refs/heads/main'):Promise<{id:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/agents`,{method:'POST',body:JSON.stringify({input_revision:inputRevision,task,capabilities,network_policy:networkPolicy,max_seconds:maxSeconds,target_ref:targetRef})})}
   agentJob(id:string):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}`)}
   cancelAgentJob(id:string,reason='cancelled by user'):Promise<{job:AgentJob}>{return this.request(`/v1/agents/${encodeURIComponent(id)}/cancel`,{method:'POST',body:JSON.stringify({reason})})}
   revision(repo:string,oid:string):Promise<RevisionRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/revisions/${encodeURIComponent(oid)}`)}

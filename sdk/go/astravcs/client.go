@@ -79,15 +79,15 @@ type AgentJob struct {
 	Repo          string  `json:"repo"`
 	InputRevision string  `json:"input_revision"`
 	Task          string  `json:"task"`
+	TargetRef     string  `json:"target_ref"`
 	Status        string  `json:"status"`
 	Result        *string `json:"result"`
 }
 
-func (c *Client) CreateAgentJob(repo, inputRevision, task string) (string, error) {
-	var x struct {
-		ID string `json:"id"`
-	}
-	e := c.do("POST", "/v1/repos/"+repo+"/agents", map[string]any{"input_revision": inputRevision, "task": task, "capabilities": []string{"changes.create", "proposals.create"}, "network_policy": "deny", "max_seconds": 900}, &x)
+func (c *Client) CreateAgentJob(repo, inputRevision, task string) (string, error) { return c.CreateAgentJobForRef(repo,inputRevision,task,"refs/heads/main") }
+func (c *Client) CreateAgentJobForRef(repo, inputRevision, task, targetRef string) (string, error) {
+	var x struct { ID string `json:"id"` }
+	e := c.do("POST", "/v1/repos/"+repo+"/agents", map[string]any{"input_revision": inputRevision, "task": task, "capabilities": []string{"changes.create", "proposals.create"}, "network_policy": "deny", "max_seconds": 900, "target_ref": targetRef}, &x)
 	return x.ID, e
 }
 func (c *Client) AgentJob(id string) (AgentJob, error) {
