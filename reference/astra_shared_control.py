@@ -37,7 +37,7 @@ class SharedControlPlane:
   self.issue_comments_t=Table('cp_issue_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('issue_id',Integer),Column('author',String(256)),Column('body',Text),Column('created_at',Integer))
   self.review_threads=Table('cp_review_threads',self.meta,Column('id',String(64),primary_key=True),Column('proposal_id',String(64),nullable=False),Column('revision_id',String(64),nullable=False),Column('node_id',String(32),nullable=False),Column('path_hex',Text,nullable=False),Column('line_start',Integer),Column('line_end',Integer),Column('state',String(16),nullable=False),Column('author',String(256),nullable=False),Column('created_at',Integer,nullable=False),Column('resolved_by',String(256)),Column('resolved_at',Integer))
   self.review_thread_comments=Table('cp_review_thread_comments',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('thread_id',String(64),nullable=False),Column('author',String(256),nullable=False),Column('body',Text,nullable=False),Column('created_at',Integer,nullable=False))
-  self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False))
+  self.proposal_reviewers=Table('cp_proposal_reviewers',self.meta,Column('proposal_id',String(64),primary_key=True),Column('subject_kind',String(16),primary_key=True),Column('subject',String(256),primary_key=True),Column('state',String(16),nullable=False),Column('requested_by',String(256),nullable=False),Column('requested_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False),Column('provenance',String(16),nullable=False,default='manual'))
   self.merge_queue=Table('cp_merge_queue',self.meta,Column('id',Integer,primary_key=True,autoincrement=True),Column('repo',String(256),nullable=False),Column('target_ref',Text,nullable=False),Column('proposal_id',String(64),nullable=False,unique=True),Column('source_revision',String(64),nullable=False),Column('state',String(16),nullable=False),Column('enqueued_by',String(256),nullable=False),Column('enqueued_at',Integer,nullable=False),Column('updated_at',Integer,nullable=False),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0))
   self.jobs=Table('cp_agent_jobs',self.meta,Column('id',String(64),primary_key=True),Column('repo',String(256)),Column('input_revision',String(64)),Column('task',Text),Column('capabilities',Text),Column('network_policy',String(32)),Column('status',String(32)),Column('result',Text),Column('created',Integer),Column('updated',Integer),Column('worker_id',String(256)),Column('lease_until',Integer),Column('attempts',Integer,nullable=False,default=0),Column('claim_generation',Integer,nullable=False,default=0),Column('max_seconds',Integer,nullable=False,default=900),Column('deadline_at',Integer),Column('target_ref',String(1024),nullable=False,default='refs/heads/main'))
   self.packages_t=Table('cp_packages',self.meta,Column('namespace',String(256),primary_key=True),Column('name',String(256),primary_key=True),Column('version',String(256),primary_key=True),Column('filename',String(256),primary_key=True),Column('digest',String(64)),Column('size',Integer),Column('created',Integer))
@@ -54,12 +54,14 @@ class SharedControlPlane:
   proposal_cols={c['name'] for c in insp.get_columns('cp_proposals')}
   review_cols={c['name'] for c in insp.get_columns('cp_reviews')}
   check_cols={c['name'] for c in insp.get_columns('cp_checks')}
+  reviewer_cols={c['name'] for c in insp.get_columns('cp_proposal_reviewers')}
   queue_cols={c['name'] for c in insp.get_columns('cp_merge_queue')}
   job_cols={c['name'] for c in insp.get_columns('cp_agent_jobs')}
   with self.engine.begin() as c:
    if 'draft' not in proposal_cols:c.execute(text('ALTER TABLE cp_proposals ADD COLUMN draft INTEGER NOT NULL DEFAULT 0'))
    if 'source_revision' not in review_cols:c.execute(text('ALTER TABLE cp_reviews ADD COLUMN source_revision VARCHAR(64)'))
    if 'source_revision' not in check_cols:c.execute(text('ALTER TABLE cp_checks ADD COLUMN source_revision VARCHAR(64)'))
+   if 'provenance' not in reviewer_cols:c.execute(text("ALTER TABLE cp_proposal_reviewers ADD COLUMN provenance VARCHAR(16) NOT NULL DEFAULT 'manual'"))
    if 'worker_id' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN worker_id VARCHAR(256)'))
    if 'lease_until' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN lease_until INTEGER'))
    if 'attempts' not in queue_cols:c.execute(text('ALTER TABLE cp_merge_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'))
@@ -239,19 +241,36 @@ class SQLCollaborationStore:
    if updated.rowcount!=1:raise PlatformError('proposal source advanced')
    res=c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.state=='fulfilled')).values(state='requested',updated_at=now))
   self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':res.rowcount});return self.get_proposal(pid)
- def request_reviewers(self,pid,actor,principals=(),teams=()):
+ def request_reviewers(self,pid,actor,principals=(),teams=(),provenance='manual'):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
   items=[('principal',x) for x in principals]+[('team',x) for x in teams]
   if not items:raise PlatformError('at least one reviewer is required')
+  if provenance not in ('manual','code_owner'):raise PlatformError('invalid reviewer provenance')
   if any(not x or len(x)>256 for _,x in items):raise PlatformError('invalid reviewer subject')
   now=int(time.time())
   with self.cp.engine.begin() as c:
    for kind,subject in items:
     cond=and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind==kind,self.cp.proposal_reviewers.c.subject==subject)
-    if c.execute(select(self.cp.proposal_reviewers.c.proposal_id).where(cond)).first():c.execute(update(self.cp.proposal_reviewers).where(cond).values(state='requested',requested_by=actor,requested_at=now,updated_at=now))
-    else:c.execute(insert(self.cp.proposal_reviewers).values(proposal_id=pid,subject_kind=kind,subject=subject,state='requested',requested_by=actor,requested_at=now,updated_at=now))
-  self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+    if c.execute(select(self.cp.proposal_reviewers.c.proposal_id).where(cond)).first():c.execute(update(self.cp.proposal_reviewers).where(cond).values(state='requested',requested_by=actor,requested_at=now,updated_at=now,provenance=__import__('sqlalchemy').case((self.cp.proposal_reviewers.c.provenance=='manual','manual'),else_=provenance)))
+    else:c.execute(insert(self.cp.proposal_reviewers).values(proposal_id=pid,subject_kind=kind,subject=subject,state='requested',requested_by=actor,requested_at=now,updated_at=now,provenance=provenance))
+  self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams),'provenance':provenance});return self.list_requested_reviewers(pid)
+ def sync_code_owner_reviewers(self,pid,actor,owners):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  desired=set(owners)
+  if any(k not in ('principal','team') or not s or len(s)>256 for k,s in desired):raise PlatformError('invalid reviewer subject')
+  now=int(time.time())
+  with self.cp.engine.begin() as c:
+   existing=[dict(x) for x in c.execute(select(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.provenance=='code_owner'))).mappings()]
+   for row in existing:
+    key=(row['subject_kind'],row['subject'])
+    if key not in desired:c.execute(update(self.cp.proposal_reviewers).where(and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind==key[0],self.cp.proposal_reviewers.c.subject==key[1],self.cp.proposal_reviewers.c.provenance=='code_owner')).values(state='removed',updated_at=now))
+   for kind,subject in sorted(desired):
+    cond=and_(self.cp.proposal_reviewers.c.proposal_id==pid,self.cp.proposal_reviewers.c.subject_kind==kind,self.cp.proposal_reviewers.c.subject==subject);row=c.execute(select(self.cp.proposal_reviewers.c.provenance).where(cond)).first()
+    if row is None:c.execute(insert(self.cp.proposal_reviewers).values(proposal_id=pid,subject_kind=kind,subject=subject,state='requested',requested_by=actor,requested_at=now,updated_at=now,provenance='code_owner'))
+    elif row[0]=='code_owner':c.execute(update(self.cp.proposal_reviewers).where(and_(cond,self.cp.proposal_reviewers.c.state=='removed')).values(state='requested',requested_by=actor,requested_at=now,updated_at=now))
+  self.emit('review.code_owners.synced',p['repo'],actor,{'proposal_id':pid,'owners':[{'subject_kind':k,'subject':s} for k,s in sorted(desired)]});return self.list_requested_reviewers(pid)
  def remove_requested_reviewers(self,pid,actor,principals=(),teams=()):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')

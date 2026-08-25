@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.61.0.0`
+`v0.62.0.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.61.0.0` binds autonomous-agent authorization to an immutable proposal target. The durable job records `target_ref`; HTTP creation requires the input RevisionID to equal that target’s current revision, and execution cannot redirect the job to a different branch. SQLite and shared SQL use the same additive schema and semantics.
+`v0.62.0.0` adds provenance-aware automatic code-owner reviewer synchronization. Exact proposal diffs drive automatic requests, ownership evolution can retire obsolete automatic requests, and explicit manual reviewer requests remain protected from automatic removal. Local SQLite and shared SQL use compatible additive schema evolution.
 
 ## Validation available in this environment
 

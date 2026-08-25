@@ -1,3 +1,10 @@
+## 0.62.0.0 - Provenance-aware code-owner reviewer synchronization
+
+- Added first-class automatic synchronization of code-owner reviewer requests from exact proposal revision diffs.
+- Persisted reviewer-request provenance so automatic ownership changes can remove obsolete code-owner requests without deleting or downgrading manual reviewer requests.
+- Preserved fulfilled code-owner requests during idempotent synchronization while proposal-source updates continue to re-request evidence for the new source revision.
+- Added additive SQLite/shared-SQL schema migration, cross-node visibility, capability-gated HTTP synchronization, typed web client support, and permanent regressions.
+
 ## 0.61.0.0 - Immutable autonomous-agent target binding
 
 - Bound each autonomous-agent job durably to its intended proposal target ref at creation.

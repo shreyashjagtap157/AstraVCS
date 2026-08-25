@@ -84,6 +84,8 @@ class AstraServer:
      target=repo.get(ObjectType.REVISION,proposal['target_revision']);target_tree=repo.get(ObjectType.TREE,target.tree_id).as_dict()
     def sig(e):return None if e is None else (e.node_id,e.kind,e.mode,e.content_id,e.derived_from)
     return tuple(sorted(path for path in set(source_tree)|set(target_tree) if sig(source_tree.get(path))!=sig(target_tree.get(path))))
+   def _sync_code_owner_reviewers(self,name,pid,actor):
+    paths=self._proposal_changed_paths(name,pid);owners=outer.identity.owners_for_paths(name,paths);return outer.platform.sync_code_owner_reviewers(pid,actor,owners)
    def _require_code_owner_reviews(self,name,pid,policy):
     if not getattr(policy,'require_code_owner_reviews',False):return
     paths=self._proposal_changed_paths(name,pid);groups=outer.identity.owner_groups_for_paths(name,paths);evidence=outer.platform.policy_evidence(pid);latest={}
@@ -309,7 +311,9 @@ class AstraServer:
        else:raise ValueError('invalid ownership action')
        return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if p[3:]==['proposals']:
-       principal=self._require('proposals.write',name);target_ref=body['target_ref'];target_oid=dict(repo.current_view().refs).get(target_ref.encode());pid=outer.platform.open_proposal(name,target_ref,body['source_revision'],principal.principal_id,target_oid,bool(body.get('draft',False)));return self._json(201,{'id':pid,'target_revision':target_oid,'draft':bool(body.get('draft',False))})
+       principal=self._require('proposals.write',name);target_ref=body['target_ref'];source_revision=body['source_revision'];repo.get(ObjectType.REVISION,source_revision);target_oid=dict(repo.current_view().refs).get(target_ref.encode());
+       if target_oid is None:raise ValueError('proposal target_ref does not exist')
+       pid=outer.platform.open_proposal(name,target_ref,source_revision,principal.principal_id,target_oid,bool(body.get('draft',False)));self._sync_code_owner_reviewers(name,pid,principal.principal_id);return self._json(201,{'id':pid,'target_revision':target_oid,'draft':bool(body.get('draft',False))})
       if len(p)==6 and p[3]=='proposals' and p[5] in ('draft','ready'):
        principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
@@ -317,7 +321,11 @@ class AstraServer:
       if len(p)==6 and p[3]=='proposals' and p[5]=='refresh':
        principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
-       source_revision=body['source_revision'];repo.get(ObjectType.REVISION,source_revision);row=outer.platform.update_proposal_source(p[4],source_revision,principal.principal_id,body.get('expected_old',proposal['source_revision']));return self._json(200,{'proposal':row})
+       source_revision=body['source_revision'];repo.get(ObjectType.REVISION,source_revision);row=outer.platform.update_proposal_source(p[4],source_revision,principal.principal_id,body.get('expected_old',proposal['source_revision']));reviewers=self._sync_code_owner_reviewers(name,p[4],principal.principal_id);return self._json(200,{'proposal':row,'reviewers':reviewers})
+      if len(p)==6 and p[3]=='proposals' and p[5]=='sync-code-owner-reviewers':
+       principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       return self._json(200,{'reviewers':self._sync_code_owner_reviewers(name,p[4],principal.principal_id)})
       if len(p)==6 and p[3]=='proposals' and p[5] in ('request-reviewers','remove-reviewers'):
        principal=self._require('proposals.write',name);proposal=outer.platform.get_proposal(p[4])
        if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})

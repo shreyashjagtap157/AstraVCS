@@ -74,3 +74,26 @@ class RequestedReviewerTests(unittest.TestCase):
    finally:cp.close()
 
 if __name__=='__main__':unittest.main()
+
+class CodeOwnerReviewerSyncTests(unittest.TestCase):
+ def exercise(self,s):
+  pid=s.open_proposal('r','refs/heads/main',R1,'author',R1)
+  rows=s.sync_code_owner_reviewers(pid,'system',(('principal','alice'),('team','core')))
+  auto=[x for x in rows if x['provenance']=='code_owner'];self.assertEqual({(x['subject_kind'],x['subject']) for x in auto},{('principal','alice'),('team','core')})
+  s.request_reviewers(pid,'author',('alice',),())
+  self.assertEqual(next(x for x in s.list_requested_reviewers(pid) if x['subject']=='alice')['provenance'],'manual')
+  rows=s.sync_code_owner_reviewers(pid,'system',(('principal','bob'),))
+  alice=next(x for x in rows if x['subject']=='alice');core=next(x for x in rows if x['subject']=='core');bob=next(x for x in rows if x['subject']=='bob')
+  self.assertEqual((alice['provenance'],alice['state']),('manual','requested'));self.assertEqual(core['state'],'removed');self.assertEqual((bob['provenance'],bob['state']),('code_owner','requested'))
+  self.assertTrue(any(e['type']=='review.code_owners.synced' for e in s.events()))
+ def test_local_provenance_preserves_manual_requests(self):
+  with tempfile.TemporaryDirectory() as td:
+   s=CollaborationStore(Path(td)/'p.db')
+   try:self.exercise(s)
+   finally:s.close()
+ def test_shared_provenance_and_cross_node_visibility(self):
+  with tempfile.TemporaryDirectory() as td:
+   url='sqlite:///'+str((Path(td)/'cp.db').resolve());a=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'));b=SharedControlPlane(url,FileBlobBackend(Path(td)/'blobs'))
+   try:
+    pid=a.platform_store.open_proposal('r','refs/heads/main',R1,'author',R1);a.platform_store.sync_code_owner_reviewers(pid,'system',(('team','core'),));row=b.platform_store.list_requested_reviewers(pid)[0];self.assertEqual((row['subject'],row['provenance']),('core','code_owner'))
+   finally:a.close();b.close()

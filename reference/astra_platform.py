@@ -19,7 +19,7 @@ class CollaborationStore:
   CREATE TABLE IF NOT EXISTS issue_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,issue_id INTEGER,author TEXT,body TEXT,created_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_threads(id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,revision_id TEXT NOT NULL,node_id TEXT NOT NULL,path_hex TEXT NOT NULL,line_start INTEGER,line_end INTEGER,state TEXT NOT NULL,author TEXT NOT NULL,created_at INTEGER NOT NULL,resolved_by TEXT,resolved_at INTEGER);
   CREATE TABLE IF NOT EXISTS review_thread_comments(id INTEGER PRIMARY KEY AUTOINCREMENT,thread_id TEXT NOT NULL,author TEXT NOT NULL,body TEXT NOT NULL,created_at INTEGER NOT NULL);
-  CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(proposal_id,subject_kind,subject));
+  CREATE TABLE IF NOT EXISTS proposal_reviewers(proposal_id TEXT NOT NULL,subject_kind TEXT NOT NULL,subject TEXT NOT NULL,state TEXT NOT NULL,requested_by TEXT NOT NULL,requested_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,provenance TEXT NOT NULL DEFAULT 'manual',PRIMARY KEY(proposal_id,subject_kind,subject));
   CREATE TABLE IF NOT EXISTS merge_queue(id INTEGER PRIMARY KEY AUTOINCREMENT,repo TEXT NOT NULL,target_ref TEXT NOT NULL,proposal_id TEXT NOT NULL UNIQUE,source_revision TEXT NOT NULL,state TEXT NOT NULL,enqueued_by TEXT NOT NULL,enqueued_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,worker_id TEXT,lease_until INTEGER,attempts INTEGER NOT NULL DEFAULT 0);
   CREATE INDEX IF NOT EXISTS merge_queue_order ON merge_queue(repo,target_ref,state,id);
   ''')
@@ -31,6 +31,8 @@ class CollaborationStore:
   if 'source_revision' not in check_cols:self.db.execute('ALTER TABLE checks ADD COLUMN source_revision TEXT')
   self.db.execute('UPDATE reviews SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=reviews.proposal_id) WHERE source_revision IS NULL')
   self.db.execute('UPDATE checks SET source_revision=(SELECT source_revision FROM proposals WHERE proposals.id=checks.proposal_id) WHERE source_revision IS NULL')
+  reviewer_cols={r['name'] for r in self.db.execute('PRAGMA table_info(proposal_reviewers)')}
+  if 'provenance' not in reviewer_cols:self.db.execute("ALTER TABLE proposal_reviewers ADD COLUMN provenance TEXT NOT NULL DEFAULT 'manual'")
   queue_cols={r['name'] for r in self.db.execute('PRAGMA table_info(merge_queue)')}
   if 'worker_id' not in queue_cols:self.db.execute('ALTER TABLE merge_queue ADD COLUMN worker_id TEXT')
   if 'lease_until' not in queue_cols:self.db.execute('ALTER TABLE merge_queue ADD COLUMN lease_until INTEGER')
@@ -65,15 +67,30 @@ class CollaborationStore:
   if updated.rowcount!=1:
    self.db.rollback();raise PlatformError('proposal source advanced')
   cur=self.db.execute("UPDATE proposal_reviewers SET state='requested',updated_at=? WHERE proposal_id=? AND state='fulfilled'",(now,pid));self.db.commit();self.emit('proposal.source.updated',p['repo'],actor,{'proposal_id':pid,'old_source_revision':p['source_revision'],'source_revision':source_revision,'re_requested_reviewers':cur.rowcount});return self.get_proposal(pid)
- def request_reviewers(self,pid,actor,principals=(),teams=()):
+ def request_reviewers(self,pid,actor,principals=(),teams=(),provenance='manual'):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
   items=[('principal',x) for x in principals]+[('team',x) for x in teams]
   if not items:raise PlatformError('at least one reviewer is required')
+  if provenance not in ('manual','code_owner'):raise PlatformError('invalid reviewer provenance')
   if any(not x or len(x)>256 for _,x in items):raise PlatformError('invalid reviewer subject')
   now=int(time.time())
-  for kind,subject in items:self.db.execute("INSERT INTO proposal_reviewers(proposal_id,subject_kind,subject,state,requested_by,requested_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(proposal_id,subject_kind,subject) DO UPDATE SET state='requested',requested_by=excluded.requested_by,requested_at=excluded.requested_at,updated_at=excluded.updated_at",(pid,kind,subject,'requested',actor,now,now))
-  self.db.commit();self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams)});return self.list_requested_reviewers(pid)
+  for kind,subject in items:self.db.execute("INSERT INTO proposal_reviewers(proposal_id,subject_kind,subject,state,requested_by,requested_at,updated_at,provenance) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(proposal_id,subject_kind,subject) DO UPDATE SET state='requested',requested_by=excluded.requested_by,requested_at=excluded.requested_at,updated_at=excluded.updated_at,provenance=CASE WHEN proposal_reviewers.provenance='manual' THEN 'manual' ELSE excluded.provenance END",(pid,kind,subject,'requested',actor,now,now,provenance))
+  self.db.commit();self.emit('review.requested',p['repo'],actor,{'proposal_id':pid,'reviewers':list(principals),'teams':list(teams),'provenance':provenance});return self.list_requested_reviewers(pid)
+ def sync_code_owner_reviewers(self,pid,actor,owners):
+  p=self.get_proposal(pid)
+  if not p:raise PlatformError('proposal not found')
+  desired=set(owners)
+  if any(k not in ('principal','team') or not s or len(s)>256 for k,s in desired):raise PlatformError('invalid reviewer subject')
+  now=int(time.time());existing=[dict(x) for x in self.db.execute("SELECT * FROM proposal_reviewers WHERE proposal_id=? AND provenance='code_owner'",(pid,))]
+  for row in existing:
+   key=(row['subject_kind'],row['subject'])
+   if key not in desired:self.db.execute("UPDATE proposal_reviewers SET state='removed',updated_at=? WHERE proposal_id=? AND subject_kind=? AND subject=? AND provenance='code_owner'",(now,pid,*key))
+  for kind,subject in sorted(desired):
+   row=self.db.execute('SELECT provenance FROM proposal_reviewers WHERE proposal_id=? AND subject_kind=? AND subject=?',(pid,kind,subject)).fetchone()
+   if row is None:self.db.execute('INSERT INTO proposal_reviewers(proposal_id,subject_kind,subject,state,requested_by,requested_at,updated_at,provenance) VALUES(?,?,?,?,?,?,?,?)',(pid,kind,subject,'requested',actor,now,now,'code_owner'))
+   elif row['provenance']=='code_owner':self.db.execute("UPDATE proposal_reviewers SET state='requested',requested_by=?,requested_at=?,updated_at=? WHERE proposal_id=? AND subject_kind=? AND subject=? AND state='removed'",(actor,now,now,pid,kind,subject))
+  self.db.commit();self.emit('review.code_owners.synced',p['repo'],actor,{'proposal_id':pid,'owners':[{'subject_kind':k,'subject':s} for k,s in sorted(desired)]});return self.list_requested_reviewers(pid)
  def remove_requested_reviewers(self,pid,actor,principals=(),teams=()):
   p=self.get_proposal(pid)
   if not p:raise PlatformError('proposal not found')
