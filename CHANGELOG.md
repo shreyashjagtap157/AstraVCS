@@ -1,3 +1,9 @@
+## 0.62.1.0 - Pre-import stale-target fencing for autonomous agents
+
+- Reordered agent publication so target-ref advancement is detected before generated objects are imported into the source repository.
+- Revalidated the immutable target revision after object transfer and before proposal publication to close the concurrent-advance window.
+- Added a permanent regression proving stale agent output remains isolated and cannot create collaboration proposals.
+
 ## 0.62.0.0 - Provenance-aware code-owner reviewer synchronization
 
 - Added first-class automatic synchronization of code-owner reviewer requests from exact proposal revision diffs.

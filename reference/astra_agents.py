@@ -148,9 +148,17 @@ class AgentCoordinator:
    if not ws.status():
     return self.jobs.finish(jid,'no_change',{'reason':'agent completed without producing a repository change'},worker_id=claim_worker,claim_generation=claim_generation)
    commit=ws.commit(('Agent: '+row['task']).encode())
-   create_portable_bundle(agent,bundle.name);self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);apply_portable_bundle(source,bundle.name,publish_refs=False)
+   # A stale target must be detected before generated objects cross into the
+   # source repository. This keeps obsolete agent output entirely isolated.
    current=dict(source.current_view().refs).get(target_ref.encode())
    if current!=input_revision:
     return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced since agent input revision; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker,claim_generation=claim_generation)
+   create_portable_bundle(agent,bundle.name);self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);apply_portable_bundle(source,bundle.name,publish_refs=False)
+   # Recheck after object transfer: another writer may have advanced the ref
+   # while the bundle was being imported. Never publish a proposal against a
+   # target revision different from the job's immutable input revision.
+   current=dict(source.current_view().refs).get(target_ref.encode())
+   if current!=input_revision:
+    return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced during agent publication; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker,claim_generation=claim_generation)
    self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);pid=self.platform.open_proposal(row['repo'],target_ref,commit.revision_id,'agent:'+jid,current)
    payload=json.loads(result.get('result') or '{}');payload.update({'revision':commit.revision_id,'proposal_id':pid});return self.jobs.finish(jid,'completed',payload,worker_id=claim_worker,claim_generation=claim_generation)

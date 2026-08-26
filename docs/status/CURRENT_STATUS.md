@@ -2,7 +2,7 @@
 
 ## Version
 
-`v0.62.0.0`
+`v0.62.1.0`
 
 ## Truthful implementation state
 
@@ -10,7 +10,7 @@ AstraVCS is a substantial pre-1.0 VCS/developer-platform implementation. It is s
 
 ## Current milestone
 
-`v0.62.0.0` adds provenance-aware automatic code-owner reviewer synchronization. Exact proposal diffs drive automatic requests, ownership evolution can retire obsolete automatic requests, and explicit manual reviewer requests remain protected from automatic removal. Local SQLite and shared SQL use compatible additive schema evolution.
+`v0.62.1.0` hardens autonomous-agent publication by rejecting target advancement before generated-object import and revalidating the immutable target again before proposal publication. The preceding 0.62.0.0 milestone added provenance-aware automatic code-owner reviewer synchronization. Exact proposal diffs drive automatic requests, ownership evolution can retire obsolete automatic requests, and explicit manual reviewer requests remain protected from automatic removal. Local SQLite and shared SQL use compatible additive schema evolution.
 
 ## Validation available in this environment
 

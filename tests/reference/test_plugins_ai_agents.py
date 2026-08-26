@@ -134,6 +134,25 @@ class AgentCoordinatorTests(unittest.TestCase):
     with self.assertRaisesRegex(AgentError,'target_ref'):jobs.create(AgentSpec('r','11'*32,'bad',('repo.read',),target_ref='main'))
    finally:jobs.close()
 
+
+ def test_stale_target_is_rejected_before_generated_objects_are_imported(self):
+  from astra_server import RepositoryRegistry
+  from astra_platform import CollaborationStore
+  from astra_agents import AgentCoordinator,AgentJobStore,AgentSpec,CallbackAgentRuntime
+  from astra_local import LocalWorkspace
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);registry=RepositoryRegistry(root/'repos');repo=registry.create('r');w=LocalWorkspace(repo);(repo.worktree/'x').write_text('base');base=w.commit(b'base');platform=CollaborationStore(root/'platform.db');jobs=AgentJobStore(root/'jobs.db')
+   try:
+    jid=jobs.create(AgentSpec('r',base.revision_id,'stale edit',('changes.create','proposals.create'),target_ref='refs/heads/main'));before=set(repo.store.iter_keys())
+    concurrent_objects=set()
+    def advance(spec,workspace):
+     (workspace/'x').write_text('agent output')
+     (repo.worktree/'x').write_text('concurrent');w.commit(b'concurrent');concurrent_objects.update(repo.store.iter_keys())
+     return {'ok':True}
+    row=AgentCoordinator(registry,platform,jobs).execute(jid,CallbackAgentRuntime(advance),worker_id='w')
+    self.assertEqual(row['status'],'needs_rebase');self.assertEqual(platform.list_proposals('r'),[]);self.assertEqual(set(repo.store.iter_keys()),concurrent_objects)
+   finally:jobs.close();platform.close()
+
 class AgentLeaseFailoverTests(unittest.TestCase):
  def test_live_lease_cannot_be_stolen_and_heartbeat_extends_it(self):
   from astra_agents import AgentJobStore,AgentSpec,AgentError
