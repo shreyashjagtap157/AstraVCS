@@ -1,0 +1,15 @@
+# AstraVCS repository line-ending policy.
+# Canonical fixture files that encode exact byte contracts (repository format
+# descriptors, bundle/snapshot archives, vector corpora) must never be
+# line-normalized by Git, otherwise Windows checkouts corrupt them and break
+# byte-exact conformance assertions. Mark them binary so their stored bytes
+# are preserved verbatim on every platform.
+
+tests/fixtures/**/*.zip      -text
+tests/fixtures/**/*.astra    -text
+tests/fixtures/format1/format -text
+tests/vectors/*.tsv          -text
+
+# Everything else (source, docs, config) is normalized text. Behavior is
+# independent of the user's core.autocrlf setting.
+* text=auto
