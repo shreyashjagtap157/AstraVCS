@@ -27,7 +27,11 @@ Additional rebuildable indexes, workspaces, caches, large-content manifests/chun
 
 ## Identity guarantees
 
-Migration from bootstrap format 0 to Format 1 does not rewrite ContentID, TreeID, ChangeID, ChangeVersionID, RevisionID, ViewID, OperationID, ConflictID, AttestationID, or ReleaseManifestID. StoreKeys and semantic mappings are also preserved by the current migration.
+Migration from bootstrap format 0 to Format 1 does not rewrite ContentID, TreeID, ChangeID, ChangeVersionID, RevisionID, ViewID, OperationID, ConflictID, AttestationID, or ReleaseManifestID. **Tree and Revision IDs carry their schema version in their domain (`ASTRA:TREE:V0` vs `ASTRA:TREE:V1`, `ASTRA:REVISION:V0` vs `ASTRA:REVISION:V1`); a v0 TreeID is distinct from a v1 TreeID even if the underlying bytes are identical.** StoreKeys and semantic mappings are also preserved by the current migration.
+
+## Evolution
+
+Future physical stores may coexist with or replace `loose-v1` through a separately versioned migration while semantic IDs remain unchanged. A future Repository Format 2 requires an explicit migration/compatibility decision and cannot silently redefine Format 1 objects or identities. Tree/Revision schema downgrade (v1 → v0) is supported by re-materializing the payload without the v1 discriminator/mode/attribution bytes, preserving the underlying ContentID/RevisionID bytes. Schema upgrade (v0 → v1) requires explicit encoding of the v1 discriminator and optional fields; the result is a new TreeID/RevisionID.
 
 ## Migration
 

@@ -22,11 +22,13 @@ class HTTPSyncClient:
   except CompatibilityError as exc:raise HTTPSyncError(str(exc)) from exc
  def fetch_bundle(self,repo_name,destination_repo):
   raw=self._request('GET',f'/v1/repos/{repo_name}/bundle')
-  with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-   Path(f.name).write_bytes(raw);return apply_portable_bundle(destination_repo,f.name,publish_refs=False)
+  with tempfile.TemporaryDirectory() as td:
+   bundle_path=str(Path(td)/'bundle.astra')
+   Path(bundle_path).write_bytes(raw);return apply_portable_bundle(destination_repo,bundle_path,publish_refs=False)
  def push_bundle(self,repo_name,source_repo):
-  with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-   create_portable_bundle(source_repo,f.name);raw=Path(f.name).read_bytes()
+  with tempfile.TemporaryDirectory() as td:
+   bundle_path=str(Path(td)/'bundle.astra')
+   create_portable_bundle(source_repo,bundle_path);raw=Path(bundle_path).read_bytes()
   return json.loads(self._request('POST',f'/v1/repos/{repo_name}/bundle',raw,'application/vnd.astra.bundle'))
 
 class HTTPPromisor:

@@ -16,8 +16,9 @@ class SharedControlPlaneTests(unittest.TestCase):
    # Hosted repositories do not own a filesystem worktree; import a small local repository.
    from astra_repository import AstraRepository
    from astra_portable_bundle import create_portable_bundle,apply_portable_bundle
-   with tempfile.TemporaryDirectory() as local_td,tempfile.NamedTemporaryFile(suffix='.astra') as f:
-    local=AstraRepository.init(local_td);w=LocalWorkspace(local);(Path(local_td)/'x').write_text('x');rev=w.commit(b'base');create_portable_bundle(local,f.name);apply_portable_bundle(repo,f.name,publish_refs=True)
+   with tempfile.TemporaryDirectory() as local_td,tempfile.TemporaryDirectory() as bt:
+    f=Path(bt)/'bundle.astra'
+    local=AstraRepository.init(local_td);w=LocalWorkspace(local);(Path(local_td)/'x').write_text('x');rev=w.commit(b'base');create_portable_bundle(local,f);apply_portable_bundle(repo,f,publish_refs=True)
    cp_url='sqlite:///'+str(root/'control.db');blobs_a=FileBlobBackend(root/'control-blobs');blobs_b=FileBlobBackend(root/'control-blobs');a_cp=SharedControlPlane(cp_url,blobs_a);b_cp=SharedControlPlane(cp_url,blobs_b)
    a=AstraServer(root/'a',registry=reg_a,tokens=a_cp.token_store,platform=a_cp.platform_store,agent_jobs=a_cp.agent_store,packages=a_cp.package_store,workspaces=a_cp.workspace_store,worker_id='a')
    b=AstraServer(root/'b',registry=reg_b,tokens=b_cp.token_store,platform=b_cp.platform_store,agent_jobs=b_cp.agent_store,packages=b_cp.package_store,workspaces=b_cp.workspace_store,worker_id='b')
@@ -80,7 +81,7 @@ class SQLAlchemyHostedRuntimeTests(unittest.TestCase):
    try:
     repo=ra.registry.create('r')
     with tempfile.TemporaryDirectory() as local_td,tempfile.NamedTemporaryFile(suffix='.astra') as f:
-     local=AstraRepository.init(local_td);w=LocalWorkspace(local);(Path(local_td)/'x').write_text('x');rev=w.commit(b'base');lrev=local.get(__import__('astra_codec').ObjectType.REVISION,rev.revision_id);ltree=local.get(__import__('astra_codec').ObjectType.TREE,lrev.tree_id);cid=next(iter(ltree.entries))[1].content_id;create_portable_bundle(local,f.name);apply_portable_bundle(repo,f.name,publish_refs=True)
+     local=AstraRepository.init(local_td);w=LocalWorkspace(local);(Path(local_td)/'x').write_text('x');rev=w.commit(b'base');lrev=local.get(__import__('astra_codec').ObjectType.REVISION,rev.revision_id);ltree=local.get(__import__('astra_codec').ObjectType.TREE,lrev.tree_id);cid=next(iter(ltree.entries))[1].content_id;create_portable_bundle(local,f);apply_portable_bundle(repo,f,publish_refs=True)
     token=ra.control.token_store.issue(Principal('u','human'),[Grant('*','*')],None);self.assertEqual(rb.control.token_store.require(token,'repo.read','r').principal_id,'u');self.assertEqual(rb.registry.open('r').get_content(cid),b'x')
     iid=ra.control.platform_store.create_issue('r','shared issue','body','u');self.assertEqual(rb.control.platform_store.get_issue(iid)['title'],'shared issue')
    finally:ra.close();rb.close()

@@ -7,7 +7,7 @@ backend (microVM/container policy engine) implementing AgentRuntime.
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-import json,sqlite3,time,uuid
+import json,os,sqlite3,time,uuid
 
 class AgentError(RuntimeError):pass
 @dataclass(frozen=True)
@@ -138,8 +138,9 @@ class AgentCoordinator:
   source=self.registry.open(row['repo']);input_revision=row['input_revision'];bound_target=row.get('target_ref') or 'refs/heads/main'
   if target_ref is not None and target_ref!=bound_target:raise AgentError('agent job target_ref is immutable after creation')
   target_ref=bound_target;source.get(__import__('astra_codec').ObjectType.REVISION,input_revision)
-  with tempfile.TemporaryDirectory(prefix='astra-agent-') as td,tempfile.NamedTemporaryFile(suffix='.astra') as bundle:
-   create_portable_bundle(source,bundle.name);agent=AstraRepository.init(td);apply_portable_bundle(agent,bundle.name,publish_refs=True);ws=LocalWorkspace(agent);ws.checkout(input_revision,ref=None,force=True)
+  with tempfile.TemporaryDirectory(prefix='astra-agent-') as td,tempfile.TemporaryDirectory(prefix='astra-agent-bundle-') as _bundle_dir:
+   bundle_path=str(Path(_bundle_dir)/'bundle.astra')
+   create_portable_bundle(source,bundle_path);agent=AstraRepository.init(td);apply_portable_bundle(agent,bundle_path,publish_refs=True);ws=LocalWorkspace(agent);ws.checkout(input_revision,ref=None,force=True)
    # Runtime executes only inside the ephemeral worktree. Production isolation
    # is delegated to the injected runtime contract.
    result=self.jobs.run(jid,runtime,Path(td),production=production,finalize=False,worker_id=worker_id)
@@ -153,7 +154,7 @@ class AgentCoordinator:
    current=dict(source.current_view().refs).get(target_ref.encode())
    if current!=input_revision:
     return self.jobs.finish(jid,'needs_rebase',{'reason':'target ref advanced since agent input revision; refresh/rebase required','revision':commit.revision_id,'target_revision':current},worker_id=claim_worker,claim_generation=claim_generation)
-   create_portable_bundle(agent,bundle.name);self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);apply_portable_bundle(source,bundle.name,publish_refs=False)
+   create_portable_bundle(agent,bundle_path);self.jobs.assert_owned(jid,claim_worker,claim_generation=claim_generation);apply_portable_bundle(source,bundle_path,publish_refs=False)
    # Recheck after object transfer: another writer may have advanced the ref
    # while the bundle was being imported. Never publish a proposal against a
    # target revision different from the job's immutable input revision.

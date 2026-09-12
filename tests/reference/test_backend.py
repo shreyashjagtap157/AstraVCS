@@ -35,11 +35,12 @@ class HostedServerBackendTests(unittest.TestCase):
   from astra_repository import AstraRepository
   from astra_local import LocalWorkspace
   import tempfile
-  with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.TemporaryDirectory() as c,tempfile.NamedTemporaryFile(suffix='.astra') as f:
+  with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.TemporaryDirectory() as c,tempfile.TemporaryDirectory() as bt:
+   f=Path(bt)/'bundle.astra'
    local=AstraRepository.init(a);w=LocalWorkspace(local);(Path(a)/'x').write_text('x');rev=w.commit(b'c')
-   meta=SQLiteMetadataBackend(Path(b)/'m.db');hosted=HostedRepositoryRegistry(meta,FileBlobBackend(Path(b)/'blobs'));hr=hosted.create('r');create_portable_bundle(local,f.name);apply_portable_bundle(hr,f.name,publish_refs=True);self.assertIsNotNone(hr.get(ObjectType.REVISION,rev.revision_id))
+   meta=SQLiteMetadataBackend(Path(b)/'m.db');hosted=HostedRepositoryRegistry(meta,FileBlobBackend(Path(b)/'blobs'));hr=hosted.create('r');create_portable_bundle(local,f);apply_portable_bundle(hr,f,publish_refs=True);self.assertIsNotNone(hr.get(ObjectType.REVISION,rev.revision_id))
    # hosted -> local also preserves semantic identities
-   create_portable_bundle(hr,f.name);dest=AstraRepository.init(c);apply_portable_bundle(dest,f.name,publish_refs=True);self.assertIsNotNone(dest.get(ObjectType.REVISION,rev.revision_id));meta.close()
+   create_portable_bundle(hr,f);dest=AstraRepository.init(c);apply_portable_bundle(dest,f,publish_refs=True);self.assertIsNotNone(dest.get(ObjectType.REVISION,rev.revision_id));meta.close()
  def test_two_http_nodes_share_hosted_repository_backend(self):
   from astra_server import AstraServer
   from astra_security import TokenStore,Principal,Grant

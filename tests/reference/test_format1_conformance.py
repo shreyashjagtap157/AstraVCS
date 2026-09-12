@@ -19,8 +19,8 @@ class Format1ConformanceTests(unittest.TestCase):
   self.assertEqual(descriptor,{"format":1,"operation_state":1,"semantic_map":1,"storage":"loose-v1"})
  def test_independent_verifier_rejects_corrupt_mapping_and_store(self):
   with tempfile.TemporaryDirectory() as td:
-   repo=self._repo(td);mapping=next(p for _,_,p in repo.iter_mappings());mapping.write_text("0"*64+"\\n")
-   with self.assertRaises((ValueError,FileNotFoundError)):verify_format1(td)
+    repo=self._repo(td);mapping=next(p for _,_,p in repo.iter_mappings());mapping.write_bytes(b"0"*64+b"\n")
+    with self.assertRaises((ValueError,FileNotFoundError)):verify_format1(td)
  def test_format0_to_1_fixture_migration_is_identity_preserving(self):
   with tempfile.TemporaryDirectory() as td:
    repo=self._repo(td);before=LocalWorkspace(repo).head();repo.format_path.write_bytes(BOOTSTRAP_REPOSITORY_FORMAT);legacy=AstraRepository(td);self.assertTrue(legacy.migrate_to_format1());self.assertEqual(LocalWorkspace(legacy).head(),before);verify_format1(td)

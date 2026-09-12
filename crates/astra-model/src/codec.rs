@@ -15,6 +15,8 @@ pub enum ObjectType {
     View = 5,
     Operation = 6,
     Conflict = 7,
+    Attestation = 8,
+    ReleaseManifest = 9,
 }
 
 impl TryFrom<u8> for ObjectType {
@@ -29,6 +31,8 @@ impl TryFrom<u8> for ObjectType {
             5 => Ok(Self::View),
             6 => Ok(Self::Operation),
             7 => Ok(Self::Conflict),
+            8 => Ok(Self::Attestation),
+            9 => Ok(Self::ReleaseManifest),
             _ => Err(CodecError::UnknownObjectType(value)),
         }
     }

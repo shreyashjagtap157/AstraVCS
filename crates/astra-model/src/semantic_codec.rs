@@ -16,6 +16,8 @@ pub enum SemanticObject {
     View(RepositoryView),
     Operation(Operation),
     Conflict(Conflict),
+    Attestation(Attestation),
+    ReleaseManifest(ReleaseManifest),
 }
 
 impl SemanticObject {
@@ -28,6 +30,8 @@ impl SemanticObject {
             Self::View(_) => ObjectType::View,
             Self::Operation(_) => ObjectType::Operation,
             Self::Conflict(_) => ObjectType::Conflict,
+            Self::Attestation(_) => ObjectType::Attestation,
+            Self::ReleaseManifest(_) => ObjectType::ReleaseManifest,
         }
     }
 
@@ -40,6 +44,8 @@ impl SemanticObject {
             Self::View(value) => value.id(),
             Self::Operation(value) => value.id(),
             Self::Conflict(value) => value.id(),
+            Self::Attestation(value) => value.semantic_id(),
+            Self::ReleaseManifest(value) => value.semantic_id(),
         }
     }
 }
@@ -335,6 +341,58 @@ pub fn decode_semantic(envelope: &ObjectEnvelope) -> Result<SemanticObject, Sema
             let value = Revision { parents, tree, change_version };
             value.validate()?;
             SemanticObject::Revision(value)
+        }
+        ObjectType::Attestation => {
+            let mut reader = Reader::new(&envelope.payload);
+            let kind = reader.blob()?;
+            let input_count = reader.count()?;
+            let mut inputs = Vec::with_capacity(input_count as usize);
+            for _ in 0..input_count {
+                inputs.push(reader.object_id()?);
+            }
+            let affected_count = reader.count()?;
+            let mut affected_nodes = Vec::with_capacity(affected_count as usize);
+            for _ in 0..affected_count {
+                affected_nodes.push(reader.node_id()?);
+            }
+            if !affected_nodes.windows(2).all(|pair| pair[0] < pair[1]) && affected_nodes.len() > 1 {
+                return Err(SemanticCodecError::NonCanonicalOrder("conflict affected node"));
+            }
+            let sig_count = reader.count()?;
+            let mut signatures = Vec::with_capacity(sig_count as usize);
+            for _ in 0..sig_count {
+                signatures.push(reader.blob()?);
+            }
+            let value = Attestation { kind, inputs, affected_nodes, signatures };
+            value.validate()?;
+            SemanticObject::Attestation(value)
+        }
+        ObjectType::ReleaseManifest => {
+            let mut reader = Reader::new(&envelope.payload);
+            let name_len = reader.u64()? as usize;
+            let name = reader.bytes(name_len)?;
+            let seq = reader.u64()?;
+            let rev_len = reader.u32()? as usize;
+            let mut revisions = Vec::with_capacity(rev_len as usize);
+            for _ in 0..rev_len {
+                revisions.push(reader.object_id()?);
+            }
+            let mut artifacts = Vec::with_capacity(reader.u32()? as usize);
+            let art_count = reader.u32()?;
+            for _ in 0..art_count {
+                let a_name_len = reader.u32()? as usize;
+                let a_name = reader.bytes(a_name_len)?;
+                let a_oid = reader.object_id()?;
+                artifacts.push((a_name, a_oid));
+            }
+            let prov_len = reader.u32()? as usize;
+            let mut provenance = Vec::with_capacity(prov_len as usize);
+            for _ in 0..prov_len {
+                provenance.push(reader.object_id()?);
+            }
+            let value = ReleaseManifest { name, revisions, artifacts, provenance, sequence: seq };
+            value.validate()?;
+            SemanticObject::ReleaseManifest(value)
         }
         ObjectType::View => {
             let mut reader = Reader::new(&envelope.payload);

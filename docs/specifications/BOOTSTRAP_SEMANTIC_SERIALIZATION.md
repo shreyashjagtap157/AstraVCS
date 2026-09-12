@@ -1,8 +1,8 @@
 # Bootstrap Semantic Serialization v0
 
-Status: normative for the pre-1.0 bootstrap implementation only.
+Status: normative for pre-1.0 bootstrap only. v1 types and markers are supported and documented for Format 1 migration; see `reference/astra_semantic_codec.py:101-175`.
 
-AstraVCS separates **semantic identity** from **physical storage identity**. `ContentID`, `TreeID`, `ChangeVersionID`, `RevisionID`, `ViewID`, `OperationID`, and `ConflictID` describe repository meaning. `StoreKey` describes the exact encoded bootstrap envelope stored by the current loose CAS.
+AstraVCS separates **semantic identity** from **physical storage identity**. `ContentID`, `TreeID`, `ChangeVersionID`, `RevisionID`, `ViewID`, `OperationID`, `ConflictID`, `AttestationID`, and `ReleaseManifestID` describe repository meaning. `StoreKey` describes the exact encoded bootstrap envelope stored by the current loose CAS.
 
 `v0.0.6` introduces one canonical bootstrap serialization for each semantic object. The resulting payload is wrapped by `ObjectEnvelope` from `BOOTSTRAP_CODEC.md`. Repository Format 1 may replace these bytes through a reviewed migration, but it must preserve semantic identity or explicitly define a new architecture epoch.
 
@@ -17,6 +17,10 @@ AstraVCS separates **semantic identity** from **physical storage identity**. `Co
 - Maps/sets are encoded in their specified canonical order.
 - Trailing bytes are invalid.
 - A decoder must re-encode an accepted object and reject it if the result differs from the original envelope.
+- **v1 discriminator**: a leading `0x01` byte in Tree/Revision payloads signals schema version 1; `0x00` or absent signals v0. The `0x01` value is unambiguous when `MAX_COLLECTION_ITEMS < 2^24` (holds via 1M limit, not proven in spec for empty payloads).
+- **v1 Attestation**: `subject OID32 + predicate blob + payload blob + signer OID32 + sig blob64` per `reference/astra_semantic_codec.py:383-387`.
+- **v1 ReleaseManifest**: `name blob + u64 seq + u32 revs + u32 arts + u32 prov` per `reference/astra_semantic_codec.py:397-404`.
+- Attribution ranges/signedness and empty-payload edge cases are **experimental** — subject to freeze.
 
 ## Content
 
@@ -40,7 +44,8 @@ repeat entry_count:
     NodeID[16]?        # if marker=1
 ```
 
-Entries must be strictly ordered by raw path bytes. Existing Tree validation remains authoritative for path and NodeID rules.
+- **v1**: if first payload byte is `0x01`, read `mode u32be` after `node_kind`; `mode` defaults to executable if not present. Tree v1 domain: `ASTRA:TREE:V1`.
+- Entries must be strictly ordered by raw path bytes. Existing Tree validation remains authoritative for path and NodeID rules.
 
 ## ChangeVersion
 
@@ -59,9 +64,12 @@ parent RevisionID[32] * parent_count
 TreeID[32]
 u8 change_version_marker
 ChangeVersionID[32]?  # marker=1
+u8 attribution_marker  # v1 only: 0=absent, 1=present
+attribution blob       # v1 only: `blob name+blob email+i64be ts+i16be tz` if marker=1
 ```
 
-Parent order is semantically meaningful and is preserved.
+- **v1**: if `change_version_marker` has bit 0 set or attribution_marker=1, attribution data follows. Revision V1 domain: `ASTRA:REVISION:V1`. Attribution ranges and signedness are **experimental**.
+- Parent order is semantically meaningful and is preserved.
 
 ## RepositoryView
 
@@ -102,3 +110,11 @@ Conflict inputs preserve order. `affected_nodes` are semantically a set and ther
 ## Cross-language contract
 
 `tests/vectors/semantic-codec-v0.tsv` contains shared semantic IDs, complete encoded envelopes, and StoreKeys for representative objects. Python generators and Rust tests consume the same vectors.
+
+### v1 supplement (supported for Format 1)
+
+- `tree.v1`: `0x01` discriminator + `mode u32be`, per `reference/astra_model.py:145-166`, `astra_semantic_codec.py:145-166`.
+- `revision.v1`: `0x01` discriminator + attribution `blob name+blob email+i64be,i16be`, per `reference/astra_model.py:253-269`, `astra_semantic_codec.py:253-269`.
+- `attestation.v1`: `subject OID32 + predicate blob + payload blob + signer OID32 + sig blob64`, per `reference/astra_semantic_codec.py:383-387`.
+- `release.v1`: `name blob + u64 seq + u32 revs + u32 arts + u32 prov`, per `reference/astra_semantic_codec.py:397-404`.
+- Re-encode canonicality check: full round-trip must preserve identity; empty-payload edge case unaddressed, noted as experimental.

@@ -15,8 +15,8 @@ class AssuranceTests(unittest.TestCase):
    repo=AstraRepository.init(td);ws=LocalWorkspace(repo);(Path(td)/'x').write_text('x');c=ws.commit(b'c');m=create_release(repo,b'v1',(c.revision_id,),((b'app','11'*32),),sequence=5);self.assertEqual(repo.get(ObjectType.RELEASE_MANIFEST,m.manifest_id),m);r=AntiRollbackStore(repo);r.accept(5);r.accept(6)
    with self.assertRaisesRegex(AssuranceError,'rollback'):r.accept(4)
  def test_backup_restore_is_verified(self):
-  with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.NamedTemporaryFile(suffix='.astra') as f:
-   repo=AstraRepository.init(a);ws=LocalWorkspace(repo);(Path(a)/'x').write_text('x');c=ws.commit(b'c');bm=BackupManager(repo);bm.create(f.name);restored=BackupManager.restore(f.name,b);self.assertEqual(LocalWorkspace(restored).head(),c.revision_id);self.assertTrue(restored.fsck().ok)
+   with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.TemporaryDirectory() as bt:
+    repo=AstraRepository.init(a);ws=LocalWorkspace(repo);(Path(a)/'x').write_text('x');c=ws.commit(b'c');f=Path(bt)/'backup.astra';bm=BackupManager(repo);bm.create(f);restored=BackupManager.restore(f,b);self.assertEqual(LocalWorkspace(restored).head(),c.revision_id);self.assertTrue(restored.fsck().ok)
  def test_signed_update_metadata_rejects_rollback(self):
   with tempfile.TemporaryDirectory() as td:
    repo=AstraRepository.init(td);priv,pub=generate_keypair();u=SignedUpdateMetadata(priv);r=AntiRollbackStore(repo,'updates');payload,sig,k=u.create('1.0',10,'22'*32,'https://example.invalid/a');self.assertEqual(SignedUpdateMetadata.verify(payload,sig,pub,r)['version'],'1.0');old,oldsig,_=u.create('0.9',9,'22'*32,'https://example.invalid/a')

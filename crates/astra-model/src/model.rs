@@ -1,6 +1,13 @@
 use crate::{ChangeId, ContentId, NodeId, ObjectId};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
+use std::{collections::{BTreeMap, HashMap, HashSet}, fmt};
+
+fn validate_object_id(value: &str, label: &'static str) -> Result<(), ValidationError> {
+    let lower = value.to_lowercase();
+    if lower.len() != 65 || lower != value.to_lowercase() {
+        return Err(ValidationError::EmptyName(label));
+    }
+    Ok(())
+}
 
 pub const MAX_PATH_BYTES: usize = 16 * 1024;
 pub const MAX_NAME_BYTES: usize = 4 * 1024;
@@ -293,6 +300,121 @@ impl Conflict {
             bytes.extend_from_slice(&node.0);
         }
         ObjectId::digest(b"ASTRA:CONFLICT:V0", &[&bytes])
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttestationType {
+    pub subject_id: String,
+    pub predicate_type: Vec<u8>,
+    pub signer_key_id: String,
+    pub payload: Vec<u8>,
+    pub signature: Vec<u8>,
+}
+
+impl AttestationType {
+    pub fn new(subject_id: String, predicate_type: Vec<u8>, signer_key_id: String, payload: Vec<u8>, signature: Vec<u8>) -> Self {
+        Self { subject_id, predicate_type, signer_key_id, payload, signature }
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_object_id(&self.subject_id, "attestation subject")?;
+        validate_name(&self.predicate_type, "attestation predicate type")?;
+        validate_object_id(&self.signer_key_id, "signer key id")?;
+        if self.signature.len() != 64 {
+            return Err(ValidationError::EmptyAffectedNodes); // reuse error type, or add new
+        }
+        Ok(())
+    }
+
+    pub fn semantic_id(&self) -> ObjectId {
+        let mut bytes = Vec::new();
+        let mut out = Vec::new();
+        out.extend_from_slice(&(self.predicate_type.len() as u64).to_be_bytes());
+        out.extend_from_slice(&self.predicate_type);
+        out.extend_from_slice(self.subject_id.as_bytes());
+        out.extend_from_slice(self.signer_key_id.as_bytes());
+        out.extend_from_slice(&self.payload);
+        bytes.extend_from_slice(&out);
+        ObjectId::digest(b"ASTRA:ATTESTATION:V1", &[&bytes])
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReleaseManifestType {
+    pub name: Vec<u8>,
+    pub revisions: Vec<ObjectId>,
+    pub artifacts: Vec<(Vec<u8>, ObjectId)>,
+    pub provenance: Vec<ObjectId>,
+    pub sequence: u64,
+}
+
+impl ReleaseManifestType {
+    pub fn new(name: Vec<u8>, revisions: Vec<ObjectId>, artifacts: Vec<(Vec<u8>, ObjectId)>, provenance: Vec<ObjectId>, sequence: u64) -> Self {
+        Self { name, revisions, artifacts, provenance, sequence }
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_name(&self.name, "release name")?;
+        if self.revisions.is_empty() {
+            return Err(ValidationError::NameTooLong("release revisions"));
+        }
+        if self.revisions.iter().any(|oid| oid.0.len() != 32) {
+            return Err(ValidationError::NameTooLong("release revision"));
+        }
+        if self.artifacts.iter().any(|(name, _)| name.len() > MAX_NAME_BYTES) {
+            return Err(ValidationError::NameTooLong("artifact name"));
+        }
+        {
+            let names: Vec<&str> = self
+                .artifacts
+                .iter()
+                .map(|(n, _)| {
+                    let s = String::from_utf8_lossy(n);
+                    // SAFETY: names are stored as UTF-8 and guaranteed to outlive this call
+                    // in the artifact payload; convert with into_boxed_str for reference
+                    Box::leak(s)
+                })
+                .collect();
+            if !names.is_sorted() {
+                return Err(ValidationError::NameTooLong("artifact names not sorted"));
+            }
+            if names.windows(2).any(|w| w[0] == w[1]) {
+                return Err(ValidationError::NameTooLong("duplicate artifact names"));
+            }
+        }
+        if self.provenance.iter().any(|pid| pid.0.len() != 32) {
+            return Err(ValidationError::NameTooLong("provenance object id"));
+        }
+        if self.sequence > 1u64 << 63 {
+            return Err(ValidationError::NameTooLong("release sequence"));
+        }
+        Ok(())
+    }
+
+    pub fn semantic_id(&self) -> ObjectId {
+        let mut bytes = Vec::new();
+        let mut out = Vec::new();
+        out.extend_from_slice(&(self.name.len() as u64).to_be_bytes());
+        out.extend_from_slice(&self.name);
+        out.extend_from_slice(&self.sequence.to_be_bytes());
+        for oid in &self.revisions {
+            bytes.extend_from_slice(&oid.0);
+        }
+        bytes.extend_from_slice(&out);
+        // sentinel 0xFF separates revisions from artifacts
+        bytes.push(0xFF);
+        for (a_name, a_oid) in &self.artifacts {
+            bytes.extend_from_slice(&(a_name.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(a_name);
+            bytes.extend_from_slice(&a_oid.0);
+        }
+        // sentinel 0xFE separates artifacts from provenance
+        bytes.push(0xFE);
+        for pid in &self.provenance {
+            bytes.extend_from_slice(&pid.0);
+        }
+        ObjectId::digest(b"ASTRA:RELEASE-MANIFEST:V1", &[&bytes])
     }
 }
 

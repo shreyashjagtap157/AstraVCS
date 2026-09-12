@@ -22,12 +22,13 @@ class AdversarialTests(unittest.TestCase):
     try:decode_semantic(env)
     except (SemanticCodecError,ValueError):pass
  def test_bundle_path_traversal_is_rejected(self):
-  with tempfile.TemporaryDirectory() as td,tempfile.NamedTemporaryFile(suffix='.astra') as f:
+  with tempfile.TemporaryDirectory() as td,tempfile.TemporaryDirectory() as bt:
+   f=Path(bt)/'bundle.astra'
    repo=AstraRepository.init(td)
-   with zipfile.ZipFile(f.name,'w') as z:
+   with zipfile.ZipFile(f,'w') as z:
     z.writestr('manifest.json',json.dumps({'format':BUNDLE_FORMAT,'objects':[],'mappings':[],'operation_head':None}))
     z.writestr('large/../../escape',b'x')
-   with self.assertRaises(BundleError):apply_bundle(repo,f.name)
+   with self.assertRaises(BundleError):apply_bundle(repo,f)
    self.assertFalse((Path(td).parent/'escape').exists())
  def test_random_commit_checkout_cycles_preserve_fsck(self):
   rng=random.Random(9876)

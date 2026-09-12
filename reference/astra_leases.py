@@ -37,7 +37,7 @@ class LeaseStore:
   try:
    lease=self._row(resource)
    if not lease or lease.expires_at<=now or lease.owner!=owner or not secrets.compare_digest(lease.token,token):raise LeaseOwnershipError('lease ownership mismatch')
-   exp=now+ttl_seconds;self.db.execute('UPDATE leases SET expires=? WHERE resource=?',(exp,resource));self.db.execute('COMMIT');return Lease(resource,owner,token,exp)
+   exp=now+ttl_seconds;self.db.execute('UPDATE leases SET expires=? WHERE resource=?',(exp,resource));self.db.execute('COMMIT');return Lease(resource,owner,token,exp) if exp > lease.expires_at else raise ValueError('renewal must extend expiry')
   except Exception:self.db.execute('ROLLBACK');raise
  def release(self,resource:bytes,owner:str,token:str):
   self.db.execute('BEGIN IMMEDIATE')

@@ -193,8 +193,9 @@ class AstraServer:
       if len(p)==5 and p[3]=='content':
        oid=p[4];validate_object_id(oid);raw=repo.get_content(oid);self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['bundle']:
-       with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-        create_portable_bundle(repo,f.name);raw=Path(f.name).read_bytes()
+       with tempfile.TemporaryDirectory() as _tmp_bundle_dir:
+        bundle_path=str(Path(_tmp_bundle_dir)/'bundle.astra')
+        create_portable_bundle(repo,bundle_path);raw=Path(bundle_path).read_bytes()
        self.send_response(200);self.send_header('Content-Type','application/vnd.astra.bundle');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
       if p[3:]==['sync','capabilities']:
        c=SyncCapabilities();return self._json(200,{'protocol_version':c.protocol_version,'resumable':c.resumable,'path_filter':c.path_filter,'promised_content':c.promised_content})
@@ -294,8 +295,9 @@ class AstraServer:
        principal=self._require('repo.write',name);n=int(self.headers.get('Content-Length','0'))
        if n>512*1024*1024:raise ValueError('bundle too large')
        raw=self.rfile.read(n)
-       with tempfile.NamedTemporaryFile(suffix='.astra') as f:
-        Path(f.name).write_bytes(raw);apply_portable_bundle(repo,f.name,publish_refs=False)
+       with tempfile.TemporaryDirectory() as _tmp_bundle_dir:
+        bundle_path=str(Path(_tmp_bundle_dir)/'bundle.astra')
+        Path(bundle_path).write_bytes(raw);apply_portable_bundle(repo,bundle_path,publish_refs=False)
        outer.platform.emit('bundle.applied',name,principal.principal_id,{'bytes':len(raw)});return self._json(200,{'ok':True})
       if p[3:]==['sync','plan']:
        self._require('repo.read',name);prefixes=tuple(bytes.fromhex(x) for x in body.get('path_prefixes',[]));plan=build_sync_plan(repo,include_content=bool(body.get('include_content',True)),path_prefixes=prefixes);return self._json(200,plan.canonical_dict()|{'plan_hash':plan.plan_hash})

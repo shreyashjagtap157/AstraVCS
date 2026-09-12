@@ -382,15 +382,22 @@ def _decode_conflict(payload: bytes) -> Conflict:
 
 def _encode_attestation(value: Attestation) -> bytes:
     value.validate()
-    return (_oid(value.subject_id, "attestation subject") + _blob(value.predicate_type)
-            + _blob(value.payload) + _oid(value.signer_key_id, "signer key id")
+    return (_blob(value.predicate_type) + _oid(value.subject_id, "attestation subject")
+            + _oid(value.signer_key_id, "signer key id") + _blob(value.payload)
             + _blob(value.signature))
 
 
 def _decode_attestation(payload: bytes) -> Attestation:
-    r=_Reader(payload); value=Attestation(r.take(32).hex(),r.blob(),r.blob(),r.take(32).hex(),r.blob());r.finish()
-    try:value.validate()
-    except ValueError as exc:raise SemanticCodecError(str(exc)) from exc
+    r = _Reader(payload)
+    predicate = r.blob()                              # u64 len + bytes
+    subject = r.take(32).hex()                        # 32-byte fixed
+    signer = r.take(32).hex()                         # 32-byte fixed
+    payload_data = r.blob()                           # u64 len + bytes
+    signature = r.blob()                              # u64 len + bytes
+    r.finish()
+    value = Attestation(subject, predicate, payload_data, signer, signature)
+    try: value.validate()
+    except ValueError as exc: raise SemanticCodecError(str(exc)) from exc
     return value
 
 

@@ -1,0 +1,57 @@
+# AstraVCS reference-suite required packages.
+# This file is derived from all top-level imports across reference/ tests.
+# Install with:  pip install -r requirements.txt
+# Some packages are optional; install any missing individually.
+
+sqlalchemy
+cryptography
+typing-extensions
+fastapi
+uvicorn[standard]
+pydantic
+
+# AstraVCS reference modules
+astra_agents
+astra_ai
+astra_assurance
+astra_automation
+astra_backend
+astra_bundle
+astra_change_ops
+astra_codec
+astra_daemon
+astra_enterprise_identity
+astra_gc
+astra_git
+astra_hosting
+astra_http_sync
+astra_identity
+astra_incremental
+astra_index
+astra_large
+astra_leases
+astra_local
+astra_mcp
+astra_merge
+astra_model
+astra_modelcheck
+astra_packages
+astra_platform
+astra_plugins
+astra_policy_store
+astra_portable_bundle
+astra_promises
+astra_protocol
+astra_release_set
+astra_repository
+astra_resumable_sync
+astra_retention
+astra_search
+astra_security
+astra_semantic_codec
+astra_server
+astra_shared_control
+astra_store
+astra_store_forward
+astra_sync
+astra_workspace_manifest

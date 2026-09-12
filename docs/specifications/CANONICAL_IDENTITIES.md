@@ -108,6 +108,15 @@ affected NodeIDs sorted lexicographically (16 bytes each)
 
 Input order is semantic. Affected-node order is not; it is canonicalized before hashing.
 
+## V1 extensions (supported in Repository Format 1)
+
+The following identity domains and identity schemas are supported alongside v0 in Format 1, allowing coexistence and migration:
+
+- `ASTRA:TREE:V1` — Tree v1 includes `mode u32be` after `node_kind` (default executable if absent). See `reference/astra_model.py:175`, `reference/astra_semantic_codec.py:145-166`.
+- `ASTRA:REVISION:V1` — Revision v1 includes attribution `blob name+blob email+i64be ts+i16be` after `ChangeVersionID`. See `reference/astra_model.py:277`, `reference/astra_semantic_codec.py:253-269`.
+- `ASTRA:ATTESTATION:V1` — Attestation identity uses `signing_bytes` defined as `blob(predicate) || hex(subject) || hex(signer) || blob(payload)` per `reference/astra_model.py:404-409`. Note: this order (`pred/subj/signer/payload`) differs from `_encode_attestation` order (`subj/pred/payload/signer/sig`) per `reference/astra_semantic_codec.py:383-387`; the spec canonical order is `pred/subj/signer/payload`. Implementations must choose one and document it.
+- `ASTRA:RELEASE-MANIFEST:V1` — Manifest identity uses `manifest_id = digest(ASTRA:RELEASE-MANIFEST:V1, blob(name) || u64(seq) || concat(revs) || 0xFF || concat(blob(name) || OID) || 0xFE || concat(prov))` per `reference/astra_model.py:439-447`. Sentinels `0xFF` and `0xFE` separate revs and provenance; alternatively the Release envelope uses `u32` counts (see `reference/astra_semantic_codec.py:397-404`). The canonical identity domain uses the `0xFF/0xFE` sentinel convention.
+
 ## Golden vectors
 
 `tests/vectors/bootstrap-v0.tsv` is the shared compatibility corpus. Both the Python model and the Rust model must reproduce every vector exactly.

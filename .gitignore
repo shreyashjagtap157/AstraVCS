@@ -2,10 +2,17 @@
 **/__pycache__/
 *.pyc
 *.pyo
+*.py
 *.log
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 
+/test_output.txt
+/test_results.txt
+/python_imports.txt
+
 .validation-java/
+/updated/
+/benches/*.log

@@ -98,7 +98,7 @@ class RepositoryTests(unittest.TestCase):
             a = repo.put(b"a")
             b = repo.put(b"b")
             mapping = repo._mapping_path(ObjectType.CONTENT, a.semantic_id)
-            mapping.write_text(b.store_key + "\n", encoding="ascii")
+            mapping.write_bytes(b.store_key.encode() + b"\n")
             fsck = repo.fsck()
             self.assertEqual(fsck.semantic_mismatches, 1)
             self.assertFalse(fsck.ok)

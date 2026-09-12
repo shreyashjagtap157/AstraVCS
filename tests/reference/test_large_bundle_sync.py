@@ -16,9 +16,10 @@ class LargeBundleSyncTests(unittest.TestCase):
  def test_chunking_is_deterministic(self):
   data=bytes(range(256))*5000;self.assertEqual(list(chunk_bytes(data)),list(chunk_bytes(data)))
  def test_bundle_reconstructs_semantics_and_state(self):
-  with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.NamedTemporaryFile(suffix='.astra') as f:
-   ra=AstraRepository.init(a);w=LocalWorkspace(ra);(Path(a)/'x').write_bytes(b'x'*2000000);c=w.commit(b'big');create_bundle(ra,f.name)
-   rb=AstraRepository.init(b);m=apply_bundle(rb,f.name,publish_state=True);self.assertEqual(LocalWorkspace(rb).head(),c.revision_id);self.assertTrue(rb.fsck().ok)
+  with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b,tempfile.TemporaryDirectory() as bt:
+   f=Path(bt)/'bundle.astra'
+   ra=AstraRepository.init(a);w=LocalWorkspace(ra);(Path(a)/'x').write_bytes(b'x'*2000000);c=w.commit(b'big');create_bundle(ra,f)
+   rb=AstraRepository.init(b);m=apply_bundle(rb,f,publish_state=True);self.assertEqual(LocalWorkspace(rb).head(),c.revision_id);self.assertTrue(rb.fsck().ok)
    rev=rb.get(ObjectType.REVISION,c.revision_id);tree=rb.get(ObjectType.TREE,rev.tree_id);self.assertEqual(rb.get_content(tree.as_dict()[b'x'].content_id),b'x'*2000000)
  def test_local_sync_copies_reachable_history(self):
   with tempfile.TemporaryDirectory() as a,tempfile.TemporaryDirectory() as b:

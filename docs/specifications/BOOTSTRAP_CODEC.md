@@ -20,15 +20,17 @@ No trailing bytes are permitted.
 
 ## Object type codes
 
-| Code | Object |
-|---:|---|
-| 1 | Content |
-| 2 | Tree |
-| 3 | ChangeVersion |
-| 4 | Revision |
-| 5 | RepositoryView |
-| 6 | Operation |
-| 7 | Conflict |
+| Code | Object | Python note |
+|---:|---|---|
+| 1 | Content | |
+| 2 | Tree | |
+| 3 | ChangeVersion | |
+| 4 | Revision | |
+| 5 | RepositoryView | |
+| 6 | Operation | |
+| 7 | Conflict | |
+| 8 | ATTESTATION | supported — 64-byte Ed25519 sig over `signing_bytes` per `reference/astra_semantic_codec.py:383-387` |
+| 9 | RELEASE_MANIFEST | supported — `name blob + u64 seq + u32 revs + u32 arts + u32 prov` per `reference/astra_semantic_codec.py:397-404` |
 
 Unknown type codes fail closed.
 

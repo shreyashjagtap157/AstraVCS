@@ -3,7 +3,7 @@
 ### State-of-the-art, space-grade version control, collaboration, AI, application and integration platform
 
 **Plan status:** Clean-sheet corrected plan  
-**Current implementation status assumed by this plan:** `v0.0.0-design` unless repository inspection proves otherwise  
+**Current implementation status assumed by this plan:** `v0.62.1.0`  
 **Target:** Production-ready `v1.0.0`, followed by an explicitly evolvable post-1.0 architecture  
 **Execution model:** Autonomous or semi-autonomous software agents; no human implementation is assumed  
 **Primary implementation language:** Rust for trusted core; other languages only where justified by product surface or integration requirements  
