@@ -14,7 +14,7 @@ pub use ids::{ChangeId, ContentId, NodeId, ObjectId};
 pub use semantic_codec::{decode_semantic, encode_semantic, SemanticCodecError, SemanticObject, MAX_COLLECTION_ITEMS};
 pub use model::{
     validate_path, ChangeVersion, Conflict, HistoryError, NodeEntry, NodeKind, Operation,
-    RepositoryHistory, RepositoryView, Revision, Tree, ValidationError, MAX_NAME_BYTES,
+    RepositoryView, Revision, Tree, ValidationError, MAX_NAME_BYTES,
     MAX_PATH_BYTES,
-    Attestation, ReleaseManifest,
+    AttestationType, ReleaseManifestType,
 };

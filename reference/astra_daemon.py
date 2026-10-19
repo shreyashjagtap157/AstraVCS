@@ -15,6 +15,14 @@ class AstraDaemon:
   outer=self
   class H(BaseHTTPRequestHandler):
    def log_message(self,*a):pass
+   def end_headers(self):
+    self.send_header('Access-Control-Allow-Origin','*')
+    self.send_header('Access-Control-Allow-Methods','GET, POST, OPTIONS')
+    self.send_header('Access-Control-Allow-Headers','Authorization, Content-Type')
+    self.send_header('Access-Control-Max-Age','600')
+    super().end_headers()
+   def do_OPTIONS(self):
+    self.send_response(204);self.send_header('Content-Length','0');self.end_headers()
    def auth(self):
     if self.headers.get('Authorization')!='Bearer '+outer.token:raise PermissionError('unauthorized')
    def sendj(self,status,obj):

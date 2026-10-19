@@ -1,6 +1,7 @@
 use crate::{
     ChangeId, ChangeVersion, Conflict, ContentId, NodeEntry, NodeId, NodeKind, ObjectEnvelope,
     ObjectId, ObjectType, Operation, RepositoryView, Revision, Tree, ValidationError,
+    AttestationType, ReleaseManifestType,
 };
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,8 +17,8 @@ pub enum SemanticObject {
     View(RepositoryView),
     Operation(Operation),
     Conflict(Conflict),
-    Attestation(Attestation),
-    ReleaseManifest(ReleaseManifest),
+    Attestation(AttestationType),
+    ReleaseManifest(ReleaseManifestType),
 }
 
 impl SemanticObject {
@@ -113,6 +114,10 @@ impl<'a> Reader<'a> {
             return Err(SemanticCodecError::CountTooLarge);
         }
         Ok(value)
+    }
+
+    fn bytes(&mut self, size: usize) -> Result<&'a [u8], SemanticCodecError> {
+        self.take(size)
     }
 
     fn u64(&mut self) -> Result<u64, SemanticCodecError> {
@@ -304,6 +309,8 @@ pub fn encode_semantic(value: &SemanticObject) -> Result<ObjectEnvelope, Semanti
             }
             out
         }
+        SemanticObject::Attestation(at) => encode_attestation(&at.kind, &at.inputs, &at.affected_nodes, &at.signatures)?,
+        SemanticObject::ReleaseManifest(rm) => encode_release_manifest(&rm.name, &rm.revisions, &rm.artifacts, &rm.provenance, rm.sequence)?,
     };
     Ok(ObjectEnvelope::new(value.object_type(), payload))
 }
@@ -363,7 +370,17 @@ pub fn decode_semantic(envelope: &ObjectEnvelope) -> Result<SemanticObject, Sema
             for _ in 0..sig_count {
                 signatures.push(reader.blob()?);
             }
-            let value = Attestation { kind, inputs, affected_nodes, signatures };
+            let value = AttestationType {
+                subject_id: String::new(),
+                predicate_type: kind.clone(),
+                signer_key_id: String::new(),
+                payload: Vec::new(),
+                signature: Vec::new(),
+                kind,
+                inputs,
+                affected_nodes,
+                signatures,
+            };
             value.validate()?;
             SemanticObject::Attestation(value)
         }
@@ -383,14 +400,20 @@ pub fn decode_semantic(envelope: &ObjectEnvelope) -> Result<SemanticObject, Sema
                 let a_name_len = reader.u32()? as usize;
                 let a_name = reader.bytes(a_name_len)?;
                 let a_oid = reader.object_id()?;
-                artifacts.push((a_name, a_oid));
+                artifacts.push((a_name.to_vec(), a_oid));
             }
             let prov_len = reader.u32()? as usize;
             let mut provenance = Vec::with_capacity(prov_len as usize);
             for _ in 0..prov_len {
                 provenance.push(reader.object_id()?);
             }
-            let value = ReleaseManifest { name, revisions, artifacts, provenance, sequence: seq };
+            let value = ReleaseManifestType {
+                name: name.to_vec(),
+                revisions,
+                artifacts,
+                provenance,
+                sequence: seq,
+            };
             value.validate()?;
             SemanticObject::ReleaseManifest(value)
         }
@@ -467,6 +490,45 @@ pub fn decode_semantic(envelope: &ObjectEnvelope) -> Result<SemanticObject, Sema
     }
     Ok(value)
 }
+
+fn encode_attestation(kind: &[u8], inputs: &[ObjectId], affected_nodes: &[NodeId], signatures: &[Vec<u8>]) -> Result<Vec<u8>, SemanticCodecError> {
+        let mut out = Vec::new();
+        out.extend_from_slice(kind);
+        push_count(&mut out, inputs.len())?;
+        for input in inputs {
+            out.extend_from_slice(&input.0[..]);
+        }
+        push_count(&mut out, affected_nodes.len())?;
+        for node in affected_nodes {
+            out.extend_from_slice(&node.0[..]);
+        }
+        push_count(&mut out, signatures.len())?;
+        for sig in signatures {
+            out.extend_from_slice(sig.as_slice());
+        }
+        Ok(out)
+    }
+
+    fn encode_release_manifest(name: &[u8], revisions: &[ObjectId], artifacts: &[(Vec<u8>, ObjectId)], provenance: &[ObjectId], sequence: u64) -> Result<Vec<u8>, SemanticCodecError> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(name.len() as u64).to_be_bytes());
+        out.extend_from_slice(name);
+        out.extend_from_slice(&sequence.to_be_bytes());
+        push_count(&mut out, revisions.len())?;
+        for oid in revisions {
+            out.extend_from_slice(&oid.0[..]);
+        }
+        push_count(&mut out, artifacts.len())?;
+        for (a_name, a_oid) in artifacts {
+            push_blob(&mut out, a_name);
+            out.extend_from_slice(&a_oid.0[..]);
+        }
+        push_count(&mut out, provenance.len())?;
+        for pid in provenance {
+            out.extend_from_slice(&pid.0[..]);
+        }
+        Ok(out)
+    }
 
 #[cfg(test)]
 mod tests {

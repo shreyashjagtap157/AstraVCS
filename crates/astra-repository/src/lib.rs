@@ -99,14 +99,14 @@ impl AstraRepository {
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => return Err(RepositoryError::Exists),
             Err(err) => return Err(RepositoryError::Io(err)),
         }
-        let result = (|| {
+let result = (|| {
             write_file_durable(&meta.join("format"), REPOSITORY_FORMAT, true)?;
             let mapping_root = meta.join("semantic-map");
             create_dir_all_durable(&mapping_root)?;
             let store = LooseObjectStore::open(meta.join("store"))?;
             sync_directory(&meta)?;
             sync_directory(worktree)?;
-            Ok(Self { worktree: worktree.to_path_buf(), meta, mapping_root, store })
+            Ok(Self { worktree: worktree.to_path_buf(), meta: meta.clone(), mapping_root, store })
         })();
         if result.is_err() {
             let _ = fs::remove_dir_all(&meta);
@@ -321,8 +321,18 @@ impl AstraRepository {
     }
 }
 
-fn all_object_types() -> [ObjectType; 7] {
-    [ObjectType::Content, ObjectType::Tree, ObjectType::ChangeVersion, ObjectType::Revision, ObjectType::View, ObjectType::Operation, ObjectType::Conflict]
+fn all_object_types() -> [ObjectType; 9] {
+    [
+        ObjectType::Content,
+        ObjectType::Tree,
+        ObjectType::ChangeVersion,
+        ObjectType::Revision,
+        ObjectType::View,
+        ObjectType::Operation,
+        ObjectType::Conflict,
+        ObjectType::Attestation,
+        ObjectType::ReleaseManifest,
+    ]
 }
 
 fn object_dir(value: ObjectType) -> &'static str {
@@ -334,6 +344,8 @@ fn object_dir(value: ObjectType) -> &'static str {
         ObjectType::View => "view",
         ObjectType::Operation => "operation",
         ObjectType::Conflict => "conflict",
+        ObjectType::Attestation => "attestation",
+        ObjectType::ReleaseManifest => "release-manifest",
     }
 }
 

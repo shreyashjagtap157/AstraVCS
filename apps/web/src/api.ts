@@ -21,8 +21,10 @@ export interface PluginRecord { id:string; version:string; model:string; entrypo
 export interface PluginCatalogEntry { plugin_id:string; version:string; execution_model:string; requested_capabilities:string[]; entrypoint:string; digest?:string }
 export interface AgentJob { id:string; repo:string; input_revision:string; task:string; capabilities:string; network_policy:string; target_ref:string; status:string; result:string|null; created:number; updated:number }
 export class AstraApi {
-  constructor(private readonly base:string, private token:string) {}
+  constructor(private base:string, private token:string) {}
   setToken(token:string):void { this.token=token }
+  setBase(base:string):void { this.base=base.replace(/\/+$/,'') }
+  getBase():string { return this.base }
   private async request<T>(path:string, init:RequestInit={}):Promise<T> {
     const headers=new Headers(init.headers); if(this.token) headers.set('Authorization',`Bearer ${this.token}`); headers.set('Accept','application/json');
     if(init.body && !headers.has('Content-Type')) headers.set('Content-Type','application/json');
@@ -32,6 +34,11 @@ export class AstraApi {
   }
   repositories():Promise<RepositoryList>{return this.request('/v1/repos')}
   refs(repo:string):Promise<RefRecord>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`)}
+  updateRef(repo:string,ref:string,revision:string,expectedOld?:string):Promise<{ref:string;revision:string;operation_head:string|null}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/refs`,{method:'POST',body:JSON.stringify({ref,revision,...(expectedOld?{expected_old:expectedOld}:{})})})}
+  proposal(repo:string,proposalId:string):Promise<{proposal:Proposal}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}`)}
+  addReview(repo:string,proposalId:string,state:'approved'|'changes_requested'|'commented',body=''):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/reviews`,{method:'POST',body:JSON.stringify({state,body})})}
+  setCheck(repo:string,proposalId:string,name:string,status:string,conclusion:string|null=null,details=''):Promise<{ok:boolean}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/checks`,{method:'POST',body:JSON.stringify({name,status,conclusion,details})})}
+  mergeProposal(repo:string,proposalId:string):Promise<{revision:string}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/merge`,{method:'POST',body:'{}'})}
   proposals(repo:string):Promise<{proposals:Proposal[]}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals`)}
   mergeability(repo:string,proposalId:string):Promise<Mergeability>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/proposals/${encodeURIComponent(proposalId)}/mergeability`)}
   ownershipRules(repo:string):Promise<{owners:Array<{repo:string;pattern:string;subject_kind:'principal'|'team';subject:string;priority:number}>}>{return this.request(`/v1/repos/${encodeURIComponent(repo)}/owners`)}

@@ -310,11 +310,15 @@ pub struct AttestationType {
     pub signer_key_id: String,
     pub payload: Vec<u8>,
     pub signature: Vec<u8>,
+    pub kind: Vec<u8>,
+    pub inputs: Vec<ObjectId>,
+    pub affected_nodes: Vec<NodeId>,
+    pub signatures: Vec<Vec<u8>>,
 }
 
 impl AttestationType {
-    pub fn new(subject_id: String, predicate_type: Vec<u8>, signer_key_id: String, payload: Vec<u8>, signature: Vec<u8>) -> Self {
-        Self { subject_id, predicate_type, signer_key_id, payload, signature }
+    pub fn new(subject_id: String, predicate_type: Vec<u8>, signer_key_id: String, payload: Vec<u8>, signature: Vec<u8>, kind: Vec<u8>, inputs: Vec<ObjectId>, affected_nodes: Vec<NodeId>, signatures: Vec<Vec<u8>>) -> Self {
+        Self { subject_id, predicate_type, signer_key_id, payload, signature, kind, inputs, affected_nodes, signatures }
     }
 
     pub fn validate(&self) -> Result<(), ValidationError> {
@@ -323,6 +327,21 @@ impl AttestationType {
         validate_object_id(&self.signer_key_id, "signer key id")?;
         if self.signature.len() != 64 {
             return Err(ValidationError::EmptyAffectedNodes); // reuse error type, or add new
+        }
+        validate_name(&self.kind, "attestation kind")?;
+        if self.inputs.len() < 2 {
+            return Err(ValidationError::TooFewConflictInputs);
+        }
+        let mut inputs_set = HashSet::with_capacity(self.inputs.len());
+        if self.inputs.iter().any(|input| !inputs_set.insert(*input)) {
+            return Err(ValidationError::DuplicateConflictInput);
+        }
+        if self.affected_nodes.is_empty() {
+            return Err(ValidationError::EmptyAffectedNodes);
+        }
+        let mut nodes = HashSet::with_capacity(self.affected_nodes.len());
+        if self.affected_nodes.iter().any(|node| !nodes.insert(*node)) {
+            return Err(ValidationError::DuplicateAffectedNode);
         }
         Ok(())
     }
@@ -366,15 +385,10 @@ impl ReleaseManifestType {
             return Err(ValidationError::NameTooLong("artifact name"));
         }
         {
-            let names: Vec<&str> = self
+            let names: Vec<String> = self
                 .artifacts
                 .iter()
-                .map(|(n, _)| {
-                    let s = String::from_utf8_lossy(n);
-                    // SAFETY: names are stored as UTF-8 and guaranteed to outlive this call
-                    // in the artifact payload; convert with into_boxed_str for reference
-                    Box::leak(s)
-                })
+                .map(|(n, _)| String::from_utf8_lossy(n).into_owned())
                 .collect();
             if !names.is_sorted() {
                 return Err(ValidationError::NameTooLong("artifact names not sorted"));
@@ -640,6 +654,145 @@ mod tests {
             Err(HistoryError::StaleHead { .. })
         ));
         assert_eq!(history.head, Some(first));
+    }
+
+    #[test]
+    fn publish_creates_operation_and_moves_head() {
+        let mut history = RepositoryHistory::default();
+        let revision_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let mut first_view = RepositoryView::default();
+        first_view.refs.insert(b"main".to_vec(), revision_a);
+        let view_id = first_view.id();
+        let op_id = history.publish(first_view, b"initial commit".to_vec(), None).unwrap();
+        assert_eq!(history.head, Some(op_id));
+        assert!(history.operations.contains_key(&op_id));
+        assert!(history.views.contains_key(&view_id));
+    }
+
+    #[test]
+    fn publish_rejects_stale_head() {
+        let mut history = RepositoryHistory::default();
+        let rev_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let rev_b = ObjectId::digest(b"TEST", &[b"b"]);
+        let mut view_a = RepositoryView::default();
+        view_a.refs.insert(b"main".to_vec(), rev_a);
+        let _ = history.publish(view_a, b"first".to_vec(), None);
+        let mut view_b = RepositoryView::default();
+        view_b.refs.insert(b"main".to_vec(), rev_b);
+        assert!(matches!(
+            history.publish(view_b, b"second".to_vec(), None),
+            Err(HistoryError::StaleHead { .. })
+        ));
+    }
+
+    #[test]
+    fn record_from_validates_parent_exists() {
+        let mut history = RepositoryHistory::default();
+        let rev = ObjectId::digest(b"TEST", &[b"rev"]);
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".as_slice().to_vec(), rev);
+        let missing_parent = ObjectId::digest(b"TEST", &[b"missing"]);
+        let result = history.record_from(Some(missing_parent), view, b"command".to_vec());
+        assert!(matches!(result, Err(HistoryError::MissingParent)));
+    }
+
+    #[test]
+    fn record_from_creates_operation_without_moving_head() {
+        let mut history = RepositoryHistory::default();
+        let rev = ObjectId::digest(b"TEST", &[b"rev"]);
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".to_vec(), rev);
+
+        let published = history.publish(view.clone(), b"first".to_vec(), None).unwrap();
+
+        let op_id = history.record_from(Some(published), view, b"command".to_vec()).unwrap();
+        assert!(history.operations.contains_key(&op_id));
+        assert_ne!(op_id, published);
+        assert_eq!(history.head, Some(published));
+    }
+
+    #[test]
+    fn publish_existing_moves_head_to_operation() {
+        let mut history = RepositoryHistory::default();
+        let rev_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".as_slice().to_vec(), rev_a);
+        let op1 = history.publish(view.clone(), b"first".to_vec(), None).unwrap();
+
+        let op_x = history.record_from(Some(op1), view, b"recorded".to_vec()).unwrap();
+
+        let result = history.publish_existing(op_x, Some(op1));
+        assert_eq!(result, Ok(op_x));
+        assert_eq!(history.head, Some(op_x));
+    }
+
+    #[test]
+    fn publish_existing_rejects_wrong_parents() {
+        let mut history = RepositoryHistory::default();
+        let rev_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let rev_b = ObjectId::digest(b"TEST", &[b"b"]);
+        let mut view_a = RepositoryView::default();
+        view_a.refs.insert(b"main".to_vec(), rev_a);
+        let op1 = history.publish(view_a, b"first".to_vec(), None).unwrap();
+
+        let mut view_b = RepositoryView::default();
+        view_b.refs.insert(b"main".to_vec(), rev_b);
+        let op2 = history.publish(view_b, b"second".to_vec(), Some(op1)).unwrap();
+
+        let result = history.publish_existing(op1, Some(op2));
+        assert!(matches!(result, Err(HistoryError::ParentMismatch)));
+        assert_eq!(history.head, Some(op2));
+    }
+
+    #[test]
+    fn current_view_returns_head_view() {
+        let mut history = RepositoryHistory::default();
+        let rev = ObjectId::digest(b"TEST", &[b"rev"]);
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".as_slice().to_vec(), rev);
+        let _ = history.publish(view.clone(), b"commit".to_vec(), None);
+
+        let current = history.current_view();
+        assert!(current.is_some());
+        assert_eq!(current.unwrap().refs.get(b"main".as_slice()), Some(&rev));
+    }
+
+    #[test]
+    fn undo_pops_parent_and_moves_head() {
+        let mut history = RepositoryHistory::default();
+        let rev_a = ObjectId::digest(b"TEST", &[b"a"]);
+        let rev_b = ObjectId::digest(b"TEST", &[b"b"]);
+
+        let mut view_a = RepositoryView::default();
+        view_a.refs.insert(b"main".to_vec(), rev_a);
+        let op1 = history.publish(view_a, b"first".to_vec(), None).unwrap();
+
+        let mut view_b = RepositoryView::default();
+        view_b.refs.insert(b"main".to_vec(), rev_b);
+        let op2 = history.publish(view_b, b"second".to_vec(), Some(op1)).unwrap();
+
+        assert_eq!(history.head, Some(op2));
+        let new_head = history.undo();
+        assert_eq!(new_head, Some(op1));
+        assert_eq!(history.head, Some(op1));
+
+        let new_head = history.undo();
+        assert_eq!(new_head, None);
+        assert_eq!(history.head, None);
+    }
+
+    #[test]
+    fn undo_moves_to_none_at_genesis() {
+        let mut history = RepositoryHistory::default();
+        let rev = ObjectId::digest(b"TEST", &[b"rev"]);
+        let mut view = RepositoryView::default();
+        view.refs.insert(b"main".to_vec(), rev);
+        let op1 = history.publish(view, b"commit".to_vec(), None).unwrap();
+        assert_eq!(history.head, Some(op1));
+
+        let new_head = history.undo();
+        assert_eq!(new_head, None);
+        assert_eq!(history.head, None);
     }
 
     fn expected_vector(name: &str) -> &'static str {

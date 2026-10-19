@@ -35,10 +35,10 @@ class RepositoryRegistry:
  def list(self):return sorted(p.name for p in self.root.iterdir() if (p/'.astra').is_dir())
 
 class AstraServer:
- def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,policy_store=None,identity=None,worker_id=None):
+ def __init__(self,root,policies=None,registry=None,tokens=None,platform=None,workspaces=None,packages=None,agent_jobs=None,plugins=None,plugin_catalog=None,policy_store=None,identity=None,worker_id=None,static_dir=None):
   self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
   self.registry=registry or RepositoryRegistry(self.root/'repos');self.tokens=tokens or TokenStore(self.root/'auth.sqlite');self.platform=platform or CollaborationStore(self.root/'platform.sqlite');self.workspaces=workspaces or WorkspaceManifestStore(self.root/'workspaces');self.packages=packages or PackageRegistry(self.root/'packages');self.agent_jobs=agent_jobs or AgentJobStore(self.root/'agents.sqlite')
-  self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.identity=identity or OrganizationStore(self.root/'identity.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()))
+  self.plugins=plugins or PluginRegistry(self.root/'plugins.sqlite');self.identity=identity or OrganizationStore(self.root/'identity.sqlite');self.plugin_catalog=plugin_catalog;self.agent_coordinator=AgentCoordinator(self.registry,self.platform,self.agent_jobs);self.worker_id=worker_id or ('server-'+str(uuid.uuid4()));self.static_dir=Path(static_dir).resolve() if static_dir else None
   self._owns_tokens=tokens is None;self._owns_platform=platform is None;self._owns_packages=packages is None;self._owns_agent_jobs=agent_jobs is None;self._owns_plugins=plugins is None;self._owns_identity=identity is None;self._owns_policy=policy_store is None;self.policy=policy_store or SQLRefPolicyStore('sqlite:///'+str((self.root/'policies.sqlite').resolve()));self.policy.seed(policies or [RefPolicy()]) if hasattr(self.policy,'seed') else None;self.http=None;self.thread=None
  def run_agent_job(self,jid,runtime,*,target_ref=None,production=True):
   return self.agent_coordinator.execute(jid,runtime,target_ref=target_ref,production=production,worker_id=self.worker_id)
@@ -47,6 +47,21 @@ class AstraServer:
   class Handler(BaseHTTPRequestHandler):
    server_version='AstraVCS/'+product_version()
    def log_message(self,*a):pass
+   def end_headers(self):
+    self.send_header('Access-Control-Allow-Origin','*')
+    self.send_header('Access-Control-Allow-Methods','GET, POST, OPTIONS')
+    self.send_header('Access-Control-Allow-Headers','Authorization, Content-Type')
+    self.send_header('Access-Control-Max-Age','600')
+    super().end_headers()
+   def do_OPTIONS(self):
+    self.send_response(204);self.send_header('Content-Length','0');self.end_headers()
+   def _serve_static(self):
+    if outer.static_dir is None:return False
+    entry={'/':('index.html','text/html; charset=utf-8'),'/index.html':('index.html','text/html; charset=utf-8'),'/styles.css':('styles.css','text/css; charset=utf-8'),'/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),'/dist/app.js':('dist/app.js','text/javascript; charset=utf-8'),'/dist/api.js':('dist/api.js','text/javascript; charset=utf-8')}.get(urlparse(self.path).path)
+    if entry is None:return False
+    target=(outer.static_dir/entry[0]).resolve()
+    if outer.static_dir not in target.parents or not target.is_file():return False
+    raw=target.read_bytes();self.send_response(200);self.send_header('Content-Type',entry[1]);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return True
    def _json(self,status,data):
     raw=json.dumps(data,sort_keys=True,separators=(',',':')).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
    def _body(self):
@@ -120,6 +135,7 @@ class AstraServer:
     return {'mergeable':not blockers,'blockers':blockers,'proposal_id':pid,'source_revision':proposal['source_revision'],'current_target':current,'expected_target':proposal.get('target_revision')}
    def do_GET(self):
     try:
+     if self._serve_static():return
      p=self._parts()
      if p==['v1','health']:return self._json(200,{'status':'ok','api':'v1'})
      if p==['v1','capabilities']:return self._json(200,{'product_version':product_version(),**CURRENT_COMPATIBILITY.canonical()})
@@ -157,6 +173,10 @@ class AstraServer:
        self._require('repo.read',name);return self._json(200,{'owners':outer.identity.list_path_owners(name)})
       if p[3:]==['proposals']:
        self._require('proposals.read',name);q=parse_qs(urlparse(self.path).query);status=q.get('status',['open'])[0];limit=self._page_limit(q);created,cursor_id=self._proposal_cursor(q.get('cursor',[''])[0]);rows=outer.platform.list_proposals_page(name,status,created,cursor_id,limit);return self._json(200,{'proposals':rows,'next_cursor':self._encode_proposal_cursor(rows[-1]) if len(rows)==limit else None})
+      if len(p)==5 and p[3]=='proposals':
+       self._require('proposals.read',name);proposal=outer.platform.get_proposal(p[4])
+       if not proposal or proposal['repo']!=name:return self._json(404,{'error':'proposal_not_found'})
+       return self._json(200,{'proposal':proposal})
       if p[3:]==['merge-queue']:
        self._require('proposals.read',name);q=parse_qs(urlparse(self.path).query);target=q.get('target_ref',[None])[0];state=q.get('state',['queued'])[0];return self._json(200,{'entries':outer.platform.list_merge_queue(name,target,state)})
       if len(p)==6 and p[3]=='proposals' and p[5]=='recommended-reviewers':

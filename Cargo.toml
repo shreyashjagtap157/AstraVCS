@@ -5,3 +5,6 @@ members = [
     "crates/astra-store",
     "crates/astra-repository",
 ]
+exclude = [
+    "apps/desktop/src-tauri",
+]

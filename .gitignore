@@ -2,7 +2,6 @@
 **/__pycache__/
 *.pyc
 *.pyo
-*.py
 *.log
 .DS_Store
 Thumbs.db
@@ -16,3 +15,9 @@ Thumbs.db
 .validation-java/
 /updated/
 /benches/*.log
+
+node_modules/
+apps/web/dist/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+.astra/

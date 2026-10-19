@@ -1,1 +1,84 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"><title>AstraVCS</title><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles.css"></head><body><header><h1>AstraVCS</h1><label>Session token <input id="token" type="password" autocomplete="off"></label><button id="connect">Connect</button><span id="status" role="status"></span></header><main><nav aria-label="Repositories"><h2>Repositories</h2><ul id="repos"></ul></nav><section><h2 id="selected">Select a repository</h2><h3>Refs</h3><pre id="refs"></pre><h3>Open proposals</h3><pre id="proposals"></pre><h3>Review threads</h3><pre id="review-threads"></pre><h3>Issues</h3><pre id="issues"></pre><h3>Search</h3><label>Query <input id="search-query" type="search" maxlength="512"></label><button id="search-run" disabled>Search</button><pre id="search-results"></pre><h3>Agent task</h3><label>Task <input id="agent-task" type="text" maxlength="4000"></label><button id="agent-start" disabled>Queue agent</button><pre id="agent-status"></pre></section></main><script type="module" src="dist/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+<title>AstraVCS</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+<h1>AstraVCS</h1>
+<label>Server <input id="server" type="url" placeholder="http://127.0.0.1:8080" autocomplete="url"></label>
+<label>Session token <input id="token" type="password" autocomplete="off"></label>
+<button id="connect">Connect</button>
+<span id="status" role="status"></span>
+</header>
+<main>
+<nav aria-label="Repositories">
+<h2>Repositories</h2>
+<ul id="repos"></ul>
+<form id="repo-form">
+<label>New repository <input id="repo-name" required maxlength="128" pattern="[A-Za-z0-9._-]+"></label>
+<button type="submit">Create repository</button>
+</form>
+</nav>
+<section>
+<h2 id="selected">Select a repository</h2>
+<h3>Refs</h3>
+<pre id="refs"></pre>
+<form id="ref-form">
+<label>Ref <input id="ref-name" required maxlength="512" placeholder="refs/heads/main"></label>
+<label>Revision <input id="ref-revision" required maxlength="64" placeholder="revision id"></label>
+<button type="submit">Create / update ref</button>
+</form>
+<h3>Open proposals</h3>
+<ul id="proposal-list"></ul>
+<form id="proposal-form">
+<label>Target ref <input id="proposal-ref" required maxlength="512" placeholder="refs/heads/main"></label>
+<label>Source revision <input id="proposal-revision" required maxlength="64" placeholder="revision id"></label>
+<label class="inline"><input id="proposal-draft" type="checkbox"> draft</label>
+<button type="submit">Open proposal</button>
+</form>
+<h3>Review threads</h3>
+<pre id="review-threads"></pre>
+<h3>Issues</h3>
+<ul id="issue-list"></ul>
+<form id="issue-form">
+<label>Title <input id="issue-title" required maxlength="200"></label>
+<label>Body <textarea id="issue-body" maxlength="10000" rows="3"></textarea></label>
+<button type="submit">Open issue</button>
+</form>
+<h3>Search</h3>
+<label>Query <input id="search-query" type="search" maxlength="512"></label>
+<button id="search-run" disabled>Search</button>
+<pre id="search-results"></pre>
+<h3>Agent task</h3>
+<label>Task <input id="agent-task" type="text" maxlength="4000"></label>
+<button id="agent-start" disabled>Queue agent</button>
+<pre id="agent-status"></pre>
+<h3>Local daemon</h3>
+<div id="daemon-panel" hidden>
+<label>Repository root <input id="daemon-root" type="text" placeholder="C:\path\to\workspace" autocomplete="off"></label>
+<button id="daemon-connect">Connect daemon</button>
+<button id="daemon-reveal" disabled>Reveal folder</button>
+<button id="daemon-refresh" disabled>Refresh status</button>
+<button id="daemon-log" disabled>History</button>
+<pre id="daemon-status"></pre>
+<pre id="daemon-history"></pre>
+<label>Commit message <input id="daemon-commit-msg" type="text" maxlength="4000"></label>
+<button id="daemon-commit" disabled>Commit</button>
+<label>New branch <input id="daemon-branch" type="text" maxlength="512" placeholder="feature-x"></label>
+<button id="daemon-branch-create" disabled>Create branch</button>
+<label>Branch <select id="daemon-branches" disabled aria-label="branches"></select></label>
+<button id="daemon-switch" disabled>Switch branch</button>
+<pre id="daemon-out"></pre>
+</div>
+</section>
+</main>
+<script type="module" src="dist/app.js"></script>
+</body>
+</html>
