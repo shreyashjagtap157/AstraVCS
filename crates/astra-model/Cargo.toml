@@ -8,3 +8,4 @@ description = "Executable reference model for AstraVCS semantic identities and r
 
 [dependencies]
 sha2 = "0.10"
+rings = { version = "0.7", features = ["ed25519"] }

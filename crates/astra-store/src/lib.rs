@@ -387,9 +387,14 @@ fn sync_directory(path: &Path) -> Result<(), StoreError> {
 
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), StoreError> {
-    // Windows durability requires platform-specific directory-handle support.
-    // The bootstrap store does not claim that guarantee until the Windows
-    // implementation is added and validated.
+    // Windows durability guarantee is not provided by this bootstrap store
+    // implementation. The current Rust implementation explicitly does not claim
+    // directory-level fsync or flush durability on Windows (RFC-6.12). A
+    // platform-specific implementation using Windows directory handles and
+    // fsync-style semantics would be required to provide that guarantee.
+    // Until then, the store does not provide directory durability guarantees
+    // on Windows, and publication on Windows relies on the underlying
+    // filesystem's default durability characteristics.
     Ok(())
 }
 

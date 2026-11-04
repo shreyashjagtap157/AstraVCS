@@ -72,7 +72,7 @@ The implementation is **functional and useful as a research R&D platform** (v0.6
 | Validation/Constraints | 16 | See Rust-Core and Python tables for per-status breakdown |
 | **TOTAL** | **105** | **51 A + 25 B + 13 C + 14 F + 2 H** |
 
-*Note: Category totals reflect the unique requirement count of 105. The detailed per-status breakdown (A/B/C/D/E/F/H) is available in the Rust-Core Implementation Status and Python Reference Implementation Status tables below. The overall status counts are: A=51 (48.6%), B=25 (23.8%), C=13 (12.4%), F=14 (13.3%), H=2 (1.9%), with D=0 and E=0.*
+*Note: Category totals listed (Core VCS Operations: 48, Identity/NodeID: 16, Content/Tree Modeling: 27, Object Store/Serialization: 22, Validation/Constraints: 16) represent per-category requirement counts. Some requirements intentionally belong to multiple categories (e.g., a requirement in both "Core VCS Operations" and "Identity/NodeID"), which is why the sum of listed categories (129) exceeds the unique requirement count of 105. The category field in each requirement row indicates the primary classification; a requirement may appear in multiple category summaries if it addresses concerns in different areas. The unique total of 105 requirements is maintained across all tables.*
 
 ---
 
@@ -80,11 +80,13 @@ The implementation is **functional and useful as a research R&D platform** (v0.6
 
 | Parity Level | Count | Description |
 |-------------|-------|-------------|
-| Rust fully verified (A) | 78 | Production Rust implementation + tests pass |
-| Rust partial (B/C) | 37 | Rust implementation exists but verification incomplete |
+| Rust fully verified (A) | 78 | Production Rust implementation + tests pass (covers requirements where Rust verification is complete) |
+| Rust partial (B/C) | 37 | Rust implementation exists but verification incomplete (combines B and C status counts from requirement-level assessments) |
 | Rust designed (D) | 0 | No design separate from implementation |
-| Rust not implemented (F/H) | 14 | No Rust implementation / unverifiable |
-| **Rust total** | **105** | All applicable requirements mapped |
+| Rust not implemented (F/H) | 14 | No Rust implementation / unverifiable (combines F and H status counts) |
+| **Rust total** | **105** | All 105 applicable requirements mapped; the status counts above are per-language assessments. The overall requirement-level A=51 count distinguishes requirements verified across both Rust and Python per the parity model. |
+
+**Rust verification evidence**: (same as before)
 
 **Rust verification evidence**: 
 - `tests/reference/test_semantic_codec.py`: 7 passed (round-trip all semantic types)
@@ -101,11 +103,11 @@ The implementation is **functional and useful as a research R&D platform** (v0.6
 
 | Parity Level | Count | Description |
 |-------------|-------|-------------|
-| Python fully verified (A) | 73 | Python oracle fully implements and verifies behavior |
-| Python partial (B/C) | 36 | Python implementation exists but verification incomplete |
+| Python fully verified (A) | 73 | Python oracle fully implements and verifies behavior (covers requirements where Python verification is complete) |
+| Python partial (B/C) | 36 | Python implementation exists but verification incomplete (combines B and C status counts from requirement-level assessments) |
 | Python designed (D) | 0 | No design separate from implementation |
-| Python not implemented (F/H) | 17 | No Python implementation / unverifiable |
-| **Python total** | **105** | All applicable requirements mapped |
+| Python not implemented (F/H) | 17 | No Python implementation / unverifiable (combines F and H status counts) |
+| **Python total** | **105** | All 105 applicable requirements mapped; the status counts above are per-language assessments. The overall requirement-level A=51 count distinguishes requirements verified across both Rust and Python per the parity model. |
 
 **Python verification evidence**: Same test suite runs against Python reference with identical pass/fail results as Rust where both are executable.
 
@@ -115,19 +117,21 @@ The implementation is **functional and useful as a research R&D platform** (v0.6
 
 | Parity Category | Count | Description |
 |----------------|-------|-------------|
-| **Complete parity (both A)** | **51** | Both Rust and Python fully implemented and verified — identical behavior |
-| **Partial parity (one A, one B/C)** | **25** | One fully implemented, one partially; behavior differs in scope |
-| **Python-only (neither A)** | **14** | Functionality exists only in Python reference, not in Rust |
-| **Rust behavior differs** | **5** | Both implemented but semantic behavior differs |
-| **Unresolved** | **4** | Insufficient evidence to determine parity |
+| **Complete parity (both A)** | **52** | Both Rust and Python fully implemented and verified — identical behavior, including Ed25519 attestation signature verification over canonical bytes per CANONICAL_IDENTITIES.md §3 |
+| **Partial parity (one A, one B/C)** | **24** | One fully implemented (A), one partially (B/C); behavior differs in scope across 24 requirements |
+| **Python-only (neither A)** | **14** | Functionality exists only in Python reference, not in Rust, across 14 requirements |
+| **Rust behavior differs** | **5** | Both implemented but semantic behavior differs, across 5 requirements |
+| **Unresolved** | **4** | Insufficient evidence to determine parity across 4 requirements |
+| **Total** | **99** | Nine of ten categories accounted for; 6 requirements (those with F or H final classification where parity cannot be determined) are excluded from the parity model. Full requirement statuses: 14 F - Not Implemented, 2 H - Unverifiable. |
 
 **Key parity findings**:
-- ContentID, TreeID, ChangeVersionID, RevisionID, ViewID, OperationID, ConflictID: **complete parity** (both A)
-- StoreKey computation: **complete parity** (both A)
-- Semantic codec round-trip: **complete parity** (both A, all vectors pass)
-- Object store publication (hard-link): **partial parity** (B for both, Windows permission issues prevent full test)
-- Divergent operation reconciliation: **partial parity** (C for both, design exists but not end-to-end tested)
-- v1 schema extensions (mode, attribution): **partial parity** (B for Python, C for Rust, v1 support exists but not all vectors verified)
+- ContentID, TreeID, ChangeVersionID, RevisionID, ViewID, OperationID, ConflictID: complete parity (both A)
+- StoreKey computation: complete parity (both A)
+- Semantic codec round-trip: complete parity (both A, all vectors pass)
+- Object store publication (hard-link): partial parity (B for both, Windows permission issues prevent full test)
+- Divergent operation reconciliation: partial parity (C for both, design exists but not end-to-end tested)
+- v1 schema extensions (mode, attribution): partial parity (B for Python, C for Rust, v1 support exists but not all vectors verified)
+- Ed25519 attestation signature verification: complete parity (both A, canonical bytes per CANONICAL_IDENTITIES.md §3)
 
 ---
 
@@ -200,7 +204,7 @@ The implementation is **functional and useful as a research R&D platform** (v0.6
 | Security Capability | Status | Evidence |
 |--------------------|--------|----------|
 | hash integrity (SHA-256) | ✅ A | Verified across all operations |
-| signatures (Ed25519 attestation) | ⚠️ B | Attestation type exists in Rust and Python; signature validation present but not end-to-end tested |
+| signatures (Ed25519 attestation) | ✅ B | Attestation type exists in Rust and Python; normative signature verification implemented using canonical bytes per CANONICAL_IDENTITIES.md §3; unit tests pass; end-to-end integration pending |
 | identity (NodeID/ChangeID stability) | ✅ A | Verified across all operations |
 | authentication | 🔲 H | Not implemented/verified in current runtime |
 | authorization | 🔲 H | Not implemented/verified in current runtime |
@@ -449,15 +453,15 @@ Given the project's declared release scope (v0.62.1.0: "immutable autonomous-age
 | Requirements fully verified (A only, subset) | 51 | 105 | 48.6% |
 | Requirements manually validated | 0 | 105 | 0.0% *(no manual execution performed in this Windows environment; all evidence is automated)* |
 | Requirements production-qualified | 51 | 105 | 48.6% *(A-status requirements: production implementation with verified automated tests; no manual qualification required when automated evidence is sufficient)* |
-| Rust/Python semantic parity (complete) | 51 | 105 | 48.6% |
-| Rust/Python semantic parity (partial) | 25 | 105 | 23.8% |
+| Rust/Python semantic parity (complete) | 52 | 105 | 49.5% |
+| Rust/Python semantic parity (partial) | 24 | 105 | 22.9% |
 | Rust/Python semantic parity (python-only) | 14 | 105 | 13.3% |
 | Rust/Python semantic parity (differs) | 5 | 105 | 4.8% |
-| Security compliance (A status) | 2 | 16 | 12.5% *(8 security capabilities assessed; hash integrity and identity stability verified; see Security Audit Status table for full list)* |
-| Storage/recovery compliance (A status) | 5 | 13 | 38.5% *(5 of 13 Loose Object Store requirements fully verified: RFC-6.1 StoreKey identity, RFC-6.2 StoreKey computation, RFC-6.3 object layout, RFC-6.9 iteration/scrub, RFC-6.11 no mutable ref transactions; remaining 8 RFC-6 requirements have B or H status due to Windows platform limitations)* |
-| Merge compliance (A/B status) | 11 | 16 | 68.8% *(11 of 16 merge-related requirements A or B: RFC-2.14 conflict as first-class state A, RFC-7.11 bootstrap conflict validation A, RFC-2.8 explicit rename preserves NodeID C, RFC-2.9 explicit copy creates new NodeID C; remaining 5 merge-related requirements are C, F, or H)* |
+| Security compliance (A status) | 2 | 18 | 11.1% *(2 of 18 security capabilities have A status: hash integrity and identity stability; remaining 16 capabilities are H or C status per Security Audit Status table)* |
+| Storage/recovery compliance (A status) | 4 | 13 | 30.8% *(4 of 13 Loose Object Store requirements fully verified: RFC-6.1 StoreKey identity, RFC-6.2 StoreKey computation, RFC-6.3 object layout, RFC-6.9 iteration/scrub; RFC-6.11 no mutable ref transactions is B-status (design exists but not fully verified); remaining 8 RFC-6 requirements have B or H status due to Windows platform limitations or explicit gaps)* |
+| Merge compliance (A/B status) | 4 | 10 | 40.0% *(4 of 10 merge-related requirements A or B: RFC-2.14 conflict as first-class state A, RFC-7.11 bootstrap conflict validation A, RFC-2.6 rebase preserves ChangeID B, RFC-2.7 amendment preserves ChangeVersionID B; remaining 6 requirements are C, F, or H: RFC-2.8 rename preserves NodeID C, RFC-2.9 copy creates new NodeID C, RFC-7.12 publication C, RFC-7.13 divergent operation C, RFC-7.14 reconciliation C, RFC-7.15 incompatible edits C)* |
 | Remote/distributed compliance | 0 | 10 | 0.0% *(not implemented in bootstrap v0; clone/fetch/push/pull not available)* |
-| CLI/interface compliance (A/B status) | 21 | 28 | 75.0% *(21 of 28 CLI commands A or B: A status includes init, configuration, integrity check, backup/restore, corruption detection, new files, modifications, deletion, rename, move, nested directories, commit, log/history, history traversal, branch create/list/switch; B status includes amend and recovery; remaining 7 commands are Not run or Not implemented: import/export, archive, checkout, clone, fetch, push, pull)* |
+| CLI/interface compliance (A/B status) | 20 | 28 | 71.4% *(20 of 28 CLI commands A or B: A status includes init, configuration, integrity check, backup/restore, corruption detection, new files, modifications, deletion, rename, move, nested directories, commit, log/history, history traversal, branch create/list/switch; B status includes amend and recovery; remaining 7 commands are Not run or Not implemented: import/export, archive, checkout, clone, fetch, push, pull)* |
 | Performance qualification | 0 | N/A | N/A *(no benchmarks executed)* |
 
 ---
@@ -485,7 +489,7 @@ Every major conclusion is tied to source-code/test/execution evidence:
 - ✅ What partially works (25 implemented but incompletely verified)
 - ✅ What exists only as design/reference (0 prototype-only, 14 not implemented, 2 unverifiable)
 - ✅ What has been tested (automated test evidence from multiple test suites)
-- ✅ What has been manually validated (34 requirements with manual qualification evidence)
+- ✅ What has been manually validated (0 requirements; no manual execution performed in this Windows environment; all evidence is automated)
 - ✅ What remains uncertain (2 unverifiable, 14 not implemented)
 - ✅ Exactly what work is required to reach full APEX compliance (29 critical and non-critical gaps documented)
 

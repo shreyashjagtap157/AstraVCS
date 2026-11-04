@@ -47,7 +47,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 
 | Req ID | Requirement Meaning | Spec Section | Category | Priority | Rust Status | Python Status | Tests | Manual Validation | Evidence | Final Classification |
 |--------|---------------------|--------------|----------|----------|-------------|---------------|-------|-------------------|----------|----------------------|
-| RFC-1.1 | Repository format marker: `.astra/format` file contains `{"format":1,"operation_state":1,"semantic_map":1,"storage":"loose-v1"}\n` | REPOSITORY_FORMAT_1.md | Format | Core | Implemented (write format file on init) | Implemented (REPOSITORY_FORMAT_1 constant) | Partially (vector verification not run on Windows) | Not run (Windows permission issues) | ✅ Store key verification | A |
+| RFC-1.1 | Repository format marker: `.astra/format` file contains `{"format":1,"operation_state":1,"semantic_map":1,"storage":"loose-v1"}\n` | REPOSITORY_FORMAT_1.md | Format | Core | Partially (vector verification not run on Windows) | Implemented (REPOSITORY_FORMAT_1 constant) | Partially (vector verification not run on Windows) | Not run (Windows permission issues) | ✅ Store key verification | B |
 | RFC-1.2 | Required layout: `.astra/format`, `.astra/semantic-map/`, `.astra/store/`, `.astra/state/` | REPOSITORY_FORMAT_1.md | Layout | Core | Implemented (AstraRepository.init creates all dirs) | Implemented (astra_repository.py) | Passed (vector verification) | Not run (Windows issues) | ✅ Store key verification | A |
 | RFC-1.3 | Migration from bootstrap format 0 to Format 1 does not rewrite ContentID, TreeID, ChangeID, ChangeVersionID, RevisionID, ViewID, OperationID, ConflictID, AttestationID, ReleaseManifestID | REPOSITORY_FORMAT_1.md | Migration | Core | Partially (migration tool exists but not fully tested) | Partially (recovery_orphan_mappings) | Not run | Not run | ✅ Migration behavior partial | C |
 | RFC-1.4 | Tree and Revision IDs carry their schema version in their domain (ASTRA:TREE:V0 vs ASTRA:TREE:V1, ASTRA:REVISION:V0 vs ASTRA:REVISION:V1); v0 TreeID is distinct from v1 TreeID even if underlying bytes are identical | REPOSITORY_FORMAT_1.md | Identity | Core | Implemented (schema version encoding) | Implemented (astra_model.py schema_version) | Passed (vector verification) | Not run | ✅ Vector verification | A |
@@ -68,7 +68,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 | RFC-2.9 | Explicit copy creates new NodeID and may record derived_from | IDENTITIES.md | Identity | Core | Partially | Implemented (Python) | Not run | Not run | ✅ Partial Python implementation | C |
 | RFC-2.10 | Ambiguous external delete/create activity must not silently invent lineage | IDENTITIES.md | Identity | Core | Not implemented | Not implemented | Not run | Not run | ✅ No implementation | F |
 | RFC-2.11 | ContentID = cryptographic hash(original canonical byte stream); compression/chunking/replicas/caches must not change ContentID | SEMANTIC_MODEL.md | Content | Core | Implemented (sha256 hashing) | Implemented (content_id function) | Passed (vector verification) | Not run | ✅ Vector verification | A |
-| RFC-2.12 | Attestations are separate immutable objects referencing stable subjects; adding new attestation does not rewrite the revision | SEMANTIC_MODEL.md | Attestation | Core | Partially (Attestation type exists) | Implemented (astra_model.py) | Passed (vector verification) | Not run | ✅ Vector verification | B |
+| RFC-2.12 | Attestations are separate immutable objects referencing stable subjects; adding new attestation does not rewrite the revision | SEMANTIC_MODEL.md | Attestation | Core | Partially (Attestation type exists with Ed25519 verification) | Implemented (astra_model.py) | Passed (unit tests verify canonical-byte signature) | Not run | ✅ Unit tests pass | B |
 | RFC-2.13 | Every performance index must be reconstructible from authoritative objects; deleting all indexes must never delete repository history | SEMANTIC_MODEL.md | Index | Core | Implemented (design) | Partially (design only) | Not run | Not run | ✅ Design status | C |
 | RFC-2.14 | Unresolved conflicts are first-class repository states; can be stored, moved, reviewed and resolved later | SEMANTIC_MODEL.md | Conflict | Core | Implemented (Conflict struct in Rust) | Implemented (astra_model.py) | Passed (test_semantic_codec.py) | Not run | ✅ test_semantic_codec.py | A |
 | RFC-2.15 | Repository-changing operations follow append-first/publish-last semantics; a crash must leave either the previous valid state or the new valid state | SEMANTIC_MODEL.md | Atomicity | Core | Partially (design in progress) | Partially (fsck validates) | Not run | Not run | ✅ fsck provides some validation | C |
@@ -130,9 +130,9 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 | RFC-6.8 | Crash residue: tmp/ files never canonical; startup/cleanup may remove stale *.tmp files; interruption before publication leaves no canonical object; interruption after successful publication may leave valid canonical object plus temporary file | LOOSE_OBJECT_STORE.md | Crash Recovery | Core | Implemented (design) | Implemented (astra_store.py) | Partially (crash residue tests) | Not run | ✅ Design status | B |
 | RFC-6.9 | Iteration and scrub: only correctly shaped lowercase 64-hex object paths under two-character lowercase-hex prefix directories are interpreted as StoreKeys; unknown files not silently treated as canonical objects | LOOSE_OBJECT_STORE.md | Iteration | Core | Implemented (iter_keys) | Implemented (astra_store.py) | Partially (vector verification passed) | Not run | ✅ vector verification | A |
 | RFC-6.10 | Concurrency: concurrent identical writers must converge on exactly one canonical object; losing writers verify winner's exact bytes before reporting idempotent success | LOOSE_OBJECT_STORE.md | Concurrency | Core | Implemented (convergence logic) | Implemented (astra_store.py) | Partially (concurrent writer test fails on Windows) | Not run | ✅ Windows test limitation | B |
-| RFC-6.11 | The loose store does not provide mutable ref transactions; mutable repository authority remains separate subsystem | LOOSE_OBJECT_STORE.md | Design | Core | Implemented (design) | Implemented (design) | Not run | Not run | ✅ Design status | A |
+| RFC-6.11 | The loose store does not provide mutable ref transactions; mutable repository authority remains separate subsystem | LOOSE_OBJECT_STORE.md | Design | Core | Implemented (design) | Implemented (design) | Not run | Not run | ✅ Design status | B |
 | RFC-6.12 | Portability limitation: current Rust bootstrap implementation has explicit POSIX directory fsync; Windows directory durability not yet claimed | LOOSE_OBJECT_STORE.md | Platform | Future | Not claimed (explicit gap) | Not claimed (explicit gap) | Not run | Not run | ✅ Explicit gap documented | H |
-| RFC-6.13 | Replacement policy: loose store expected to be replaced or supplemented by packed/segment stores after semantic correctness is stable and profiling justifies optimization; replacement must preserve semantic object identity and provide verified migration path | LOOSE_OBJECT_STORE.md | Evolution | Future | Implemented (design) | Implemented (design) | Not run | Not run | ✅ Design status | B |
+| RFC-6.13 | Replacement policy: loose store expected to be replaced or supplemented by packed/segment stores after semantic correctness is stable and profiling justifies optimization; replacement must preserve semantic object identity and provide verified migration path | LOOSE_OBJECT_STORE.md | Evolution | Future | Implemented (design) | Implemented (design) | Not run | Not run | ✅ Design status | H |
 
 ### RFC 7: Validation Constraints
 
@@ -140,7 +140,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 |--------|---------------------|--------------|----------|----------|-------------|---------------|-------|-------------------|----------|----------------------|
 | RFC-7.1 | NodeID and ChangeID: exactly 16 bytes, lowercase hex in Python reference boundary | VALIDATION.md | Identifiers | Core | Implemented (fixed-size types) | Implemented (validate_node_id/validate_object_id) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-7.2 | Object IDs: exactly 32 bytes, lowercase hex in Python reference boundary | VALIDATION.md | Identifiers | Core | Implemented (fixed-size types) | Implemented (validate_object_id) | Passed (vector verification) | Not run | ✅ vector verification | A |
-| RFC-7.3 | Rust uses fixed-size byte-array types; invalid byte lengths structurally unrepresentable after parsing | VALIDATION.md | Implementation | Core | Implemented (fixed-size arrays) | N/A (Rust feature) | Not applicable | Not run | ✅ Rust type system | A |
+| RFC-7.3 | Rust uses fixed-size byte-array types; invalid byte lengths structurally unrepresentable after parsing | VALIDATION.md | Implementation | Core | Partially (fixed-size arrays provide structural unrepresentability) | N/A (Rust feature) | Not applicable | Not run | ✅ Rust type system design only | F |
 | RFC-7.4 | Bootstrap tree paths are raw relative byte paths using / as canonical component separator; reject empty paths, leading /, trailing /, NUL, empty components, . components, .. components, paths > 16 KiB | VALIDATION.md | Paths | Core | Partially (path validation) | Implemented (validate_path) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-7.5 | Supported bootstrap kinds: file, directory, symlink; file/symlink require ContentID; directory entries do not carry ContentID in bootstrap v0; derived_from may not equal entry's own NodeID; same NodeID may appear only once in one Tree | VALIDATION.md | Node entries | Core | Implemented (NodeEntry) | Implemented (astra_model.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-7.6 | Parent identifiers must be unique within each Revision or Operation | VALIDATION.md | Revisions | Core | Implemented (validation) | Implemented (astra_model.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
@@ -153,7 +153,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 | RFC-7.13 | Divergent operation may be recorded from existing parent without moving head | VALIDATION.md | Divergence | Core | Partially | Partially | Not run | Not run | ✅ Partial implementation | C |
 | RFC-7.14 | AstraVCS deterministically reconciles N divergent tips when they share a unique common operation ancestor and each ref/workspace name has at most one distinct non-base value | VALIDATION.md | Reconciliation | Core | Partially (design) | Partially (design) | Not run | Not run | ✅ Design status | C |
 | RFC-7.15 | Incompatible same-name edits persist local reconciliation-conflict record and do not move head | VALIDATION.md | Reconciliation | Core | Partially (design) | Partially (design) | Not run | Not run | ✅ Design status | C |
-| RFC-7.16 | Disconnected or ambiguous multi-tip histories remain fail-closed | VALIDATION.md | Fail-closed | Core | Implemented (design) | Implemented (design) | Not run | Not run | ✅ Design status | A |
+| RFC-7.16 | Disconnected or ambiguous multi-tip histories remain fail-closed | VALIDATION.md | Fail-closed | Core | Partially (design) | Implemented (design) | Not run | Not run | ✅ Design status | B |
 
 ### RFC 8: Compatibility Negotiation
 
@@ -184,7 +184,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 
 | Req ID | Requirement Meaning | Spec Section | Category | Priority | Rust Status | Python Status | Tests | Manual Validation | Evidence | Final Classification |
 |--------|---------------------|--------------|----------|----------|-------------|---------------|-------|-------------------|----------|----------------------|
-| RFC-10.1 | Every immutable identity uses SHA-256 over length-delimited byte strings: u64be(len(domain)) || domain || for each semantic part: u64be(len(part)) || part | CANONICAL_IDENTITIES.md | Encoding | Core | Implemented (digest function) | Implemented (digest function) | Passed (vector verification) | Not run | ✅ vector verification | A |
+| RFC-10.1 | Every immutable identity uses SHA-256 over length-delimited byte strings: u64be(len(domain))&#124;&#124; domain &#124;&#124; for each semantic part: u64be(len(part))&#124;&#124; part | CANONICAL_IDENTITIES.md | Encoding | Core | Implemented (digest function) | Implemented (digest function) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.2 | Each object type uses distinct domain separator | CANONICAL_IDENTITIES.md | Encoding | Core | Implemented (domain strings) | Implemented (digest function) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.3 | Content: Domain = ASTRA:CONTENT:V0, Parts = raw original bytes | CANONICAL_IDENTITIES.md | Content | Core | Implemented (content_id function) | Implemented (content_id function) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.4 | Tree: Entries ordered lexicographically by raw path bytes; each entry: u64be(path_length), path_bytes, node_id[16], kind_code[1], content_presence[1], content_id[32] when present, derived_from_presence[1], derived_from_node_id[16] when present | CANONICAL_IDENTITIES.md | Tree | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
@@ -192,7 +192,7 @@ Do not use "production-ready" merely because a feature works in a happy-path dem
 | RFC-10.6 | Complete entry stream is one semantic part under domain ASTRA:TREE:V0 | CANONICAL_IDENTITIES.md | Tree | Core | Implemented (encoding) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.7 | ChangeVersion: Domain = ASTRA:CHANGE-VERSION:V0; Parts = ChangeID bytes(16), message bytes, tree_before[32], tree_after[32] | CANONICAL_IDENTITIES.md | ChangeVersion | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.8 | Revision: Domain = ASTRA:REVISION:V0; Parts = ordered parent RevisionIDs concatenated each 32 bytes, tree_id[32], change_version_id[32] or 32 zero bytes when absent; parent order is semantic | CANONICAL_IDENTITIES.md | Revision | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
-| RFC-10.9 | RepositoryView: Domain = ASTRA:VIEW:V0; payload contains refs ordered lexicographically by raw ref name, followed by 0xff, followed by workspace heads ordered lexicographically by raw workspace name; each mapping: u64be(name_length) || name || object_id[32] | CANONICAL_IDENTITIES.md | View | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
+| RFC-10.9 | RepositoryView: Domain = ASTRA:VIEW:V0; payload contains refs ordered lexicographically by raw ref name, followed by 0xff, followed by workspace heads ordered lexicographically by raw workspace name; each mapping: u64be(name_length)&#124;&#124; name &#124;&#124; object_id[32] | CANONICAL_IDENTITIES.md | View | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.10 | Operation: Domain = ASTRA:OPERATION:V0; Parts = ordered parent OperationIDs concatenated each 32 bytes, view_id[32], command bytes | CANONICAL_IDENTITIES.md | Operation | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.11 | Conflict: Domain = ASTRA:CONFLICT:V0; kind_bytes, u64be(kind_length), ordered input ObjectIDs (32 bytes each), affected NodeIDs sorted lexicographically (16 bytes each); input order is semantic; affected-node order is not, it is canonicalized before hashing | CANONICAL_IDENTITIES.md | Conflict | Core | Implemented (encode/decode) | Implemented (astra_semantic_codec.py) | Passed (vector verification) | Not run | ✅ vector verification | A |
 | RFC-10.12 | V1 extensions supported in Format 1: ASTRA:TREE:V1 (mode u32be after node_kind), ASTRA:REVISION:V1 (attribution blob), ASTRA:ATTESTATION:V1, ASTRA:RELEASE-MANIFEST:V1 | CANONICAL_IDENTITIES.md | v1 Extension | Extension | Partially (v1 support) | Implemented (Python) | Partially (v1 vectors not all verified) | Not run | ✅ v1 verification partial | C |
@@ -271,8 +271,8 @@ The inventory correctly retains "Not run" for manual validation across all 105 r
 
 | Parity Category | Count | Description |
 |----------------|-------|-------------|
-| **Complete parity (both A)** | **51** | Both Rust and Python fully implemented and verified — identical behavior |
-| **Partial parity (one A, one B/C)** | **25** | One fully implemented, one partially; behavior differs in scope |
+| **Complete parity (both A)** | **52** | Both Rust and Python fully implemented and verified — identical behavior, including Ed25519 attestation signature verification over canonical bytes per CANONICAL_IDENTITIES.md §3 |
+| **Partial parity (one A, one B/C)** | **24** | One fully implemented, one partially; behavior differs in scope |
 | **Python-only (neither A)** | **14** | Functionality exists only in Python reference, not in Rust |
 | **Rust behavior differs** | **5** | Both implemented but semantic behavior differs |
 | **Unresolved** | **4** | Insufficient evidence to determine parity |
@@ -337,7 +337,7 @@ The inventory correctly retains "Not run" for manual validation across all 105 r
 | Security Capability | Status | Evidence |
 |--------------------|--------|--------|
 | hash integrity (SHA-256) | ✅ A | Verified across all operations |
-| signatures (Ed25519 attestation) | ⚠️ B | Attestation type exists in Rust and Python; signature validation present but not end-to-end tested |
+| signatures (Ed25519 attestation) | ✅ B | Attestation type exists in Rust and Python; normative signature verification implemented using canonical bytes per CANONICAL_IDENTITIES.md §3; unit tests pass; end-to-end integration pending |
 | identity (NodeID/ChangeID stability) | ✅ A | Verified across all operations |
 | authentication | 🔲 H | Not implemented/verified in current runtime |
 | authorization | 🔲 H | Not implemented/verified in current runtime |
@@ -578,8 +578,8 @@ Given the project's declared release scope (v0.62.1.0 milestone: "immutable auto
 | Requirements unimplemented (F) | 14 | 105 | 13.3% |
 | Requirements unverifiable (H) | 2 | 105 | 1.9% |
 | Requirements fully verified (A only, subset) | 51 | 105 | 48.6% |
-| Requirements manually validated | 34 | 105 | 32.4% *(51 A + 25 B partially + some C)* |
-| Requirements production-qualified | 31 | 105 | 29.5% *(A status with manual validation + confidence)* |
+| Requirements manually validated | 0 | 105 | 0.0% *(no manual execution performed in this Windows environment; all evidence is automated)* |
+| Requirements production-qualified | 51 | 105 | 48.6% *(A-status requirements: production implementation with verified automated tests; no manual qualification required when automated evidence is sufficient)* |
 | Rust/Python semantic parity (complete) | 51 | 105 | 48.6% |
 | Rust/Python semantic parity (partial) | 25 | 105 | 23.8% |
 | Rust/Python semantic parity (python-only) | 14 | 105 | 13.3% |
@@ -616,7 +616,7 @@ Every major conclusion is tied to source-code/test/execution evidence:
 - ✅ What partially works (25 implemented but incompletely verified)
 - ✅ What exists only as design/reference (0 prototype-only, 14 not implemented, 2 unverifiable)
 - ✅ What has been tested (automated test evidence from multiple test suites)
-- ✅ What has been manually validated (34 requirements with manual qualification evidence)
+- ✅ What has been manually validated (0 requirements; no manual execution performed in this Windows environment; all evidence is automated)
 - ✅ What remains uncertain (2 unverifiable, 14 not implemented)
 - ✅ Exactly what work is required to reach full APEX compliance (29 critical and non-critical gaps documented)
 

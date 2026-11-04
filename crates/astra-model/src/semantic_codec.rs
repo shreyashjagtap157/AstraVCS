@@ -509,6 +509,119 @@ fn encode_attestation(kind: &[u8], inputs: &[ObjectId], affected_nodes: &[NodeId
         Ok(out)
     }
 
+    /// Canonical signing bytes for an Ed25519 attestation signature,
+    /// per ASTRA:ATTESTATION:V1 spec (CANONICAL_IDENTITIES.md §3):
+    ///
+    ///   blob(predicate_type) || hex(subject_id) || hex(signer_key_id) || blob(payload)
+    ///
+    /// Where blob(X) = u64be(len(X)) || X, and hex(ID) decodes the object‑ID
+    /// hex string to 32 raw bytes (lowercase hex, exactly 64 hex chars = 32 bytes).
+    ///
+    /// Manual hex decode: each pair of hex characters becomes one byte.
+    fn attestation_signing_bytes(
+        predicate_type: &[u8],
+        subject_id: &str,
+        signer_key_id: &str,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        // blob(predicate_type)
+        out.extend_from_slice(&(predicate_type.len() as u64).to_be_bytes());
+        out.extend_from_slice(predicate_type);
+        // hex(subject_id) = 32 raw bytes decoded from the object-ID hex string
+        let sid_bytes = subject_id_from_hex(subject_id);
+        out.extend_from_slice(&sid_bytes);
+        // hex(signer_key_id) = 32 raw bytes decoded from the hex string
+        let skid_bytes = subject_id_from_hex(signer_key_id);
+        out.extend_from_slice(&skid_bytes);
+        // blob(payload)
+        out.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// Decode a lowercase hex string to raw bytes.
+    ///
+    /// Expects exactly 64 hex characters (representing 32 bytes), but handles
+    /// variable-length strings by processing complete byte pairs.
+    fn subject_id_from_hex(hex_str: &str) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        let clean = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+        let chars: Vec<char> = clean.chars().collect();
+        let num_pairs = std::cmp::min(chars.len() / 2, 32);
+        for i in 0..num_pairs {
+            let high = from_hex_char(chars[i * 2]);
+            let low = from_hex_char(chars[i * 2 + 1]);
+            bytes[i] = (high << 4) | low;
+        }
+        bytes
+    }
+
+    /// Decode a single lowercase hex character to its numeric value.
+    fn from_hex_char(c: char) -> u8 {
+        match c {
+            '0' => 0,
+            '1' => 1,
+            '2' => 2,
+            '3' => 3,
+            '4' => 4,
+            '5' => 5,
+            '6' => 6,
+            '7' => 7,
+            '8' => 8,
+            '9' => 9,
+            'a' => 10,
+            'b' => 11,
+            'c' => 12,
+            'd' => 13,
+            'e' => 14,
+            'f' => 15,
+            'A' => 10,
+            'B' => 11,
+            'C' => 12,
+            'D' => 13,
+            'E' => 14,
+            'F' => 15,
+            _ => 0,
+        }
+    }
+
+    /// Verify an Ed25519 signature on attestation data.
+    ///
+    /// The `signer_key` is the Ed25519 public key of the attestation signer (32 bytes).
+    /// The `attestation` is the attestation structure containing subject, predicate,
+    /// signer key id, payload, and signature.
+    /// The signature is verified over the canonical signing bytes defined by
+    /// `ASTRA:ATTESTATION:V1` (CANONICAL_IDENTITIES.md §3):
+    ///
+    ///   blob(predicate_type) || hex(subject_id) || hex(signer_key_id) || blob(payload)
+    ///
+    /// Returns `Ok(())` if the signature is valid, or `Err` with a descriptive
+    /// error if the signature is invalid, the key is invalid, or the message
+    /// is empty.
+    fn verify_ed25519_signature(
+        signer_key: &[u8; 32],
+        attestation: &AttestationType,
+    ) -> Result<(), StoreError> {
+        use rings::verify;
+        let msg = attestation_signing_bytes(
+            &attestation.kind,
+            &attestation.subject_id,
+            &attestation.signer_key_id,
+            &attestation.payload,
+        );
+        // Rings Ed25519 verification: signature is 64 bytes, public key is 32 bytes
+        verify(
+            &rings::ed25519::PublicKey::from(*signer_key),
+            &msg,
+            &rings::ed25519::Signature::from(&attestation.signature),
+        )
+        .map_err(|_| StoreError::Corrupt {
+            key: rings::ed25519::PublicKey::from(*signer_key).into(),
+            reason: "invalid Ed25519 attestation signature".into(),
+        })
+    }
+
     fn encode_release_manifest(name: &[u8], revisions: &[ObjectId], artifacts: &[(Vec<u8>, ObjectId)], provenance: &[ObjectId], sequence: u64) -> Result<Vec<u8>, SemanticCodecError> {
         let mut out = Vec::new();
         out.extend_from_slice(&(name.len() as u64).to_be_bytes());
@@ -625,5 +738,65 @@ mod tests {
         });
         assert_eq!(first.semantic_id(), second.semantic_id());
         assert_eq!(encode_semantic(&first).unwrap(), encode_semantic(&second).unwrap());
+    }
+
+    #[test]
+    fn ed25519_signature_verification() {
+        use rings::generate;
+
+        // Generate a random Ed25519 key pair
+        let (pk, sk) = rings::ed25519::generate();
+
+        // Create a test attestation
+        let subject_id = pk.to_hex(); // 32-byte public key as hex string (64 chars)
+        let signer_key_id = rings::ed25519::PublicKey::from(pk).to_hex(); // another 32-byte key as hex
+        // Actually, use the same key pair's public key as the signer_key_id
+        let signer_key_id_hex = pk.to_hex();
+        let payload = b"test payload";
+
+        // Sign the canonical signing bytes
+        let signing_bytes = attestation_signing_bytes(
+            b"\x05review", // predicate_type kind bytes
+            &subject_id,
+            &signer_key_id_hex,
+            payload,
+        );
+        let signature = rings::ed25519::sign(&sk, &signing_bytes);
+
+        // Build an attestation with the valid signature
+        let att = AttestationType {
+            subject_id,
+            predicate_type: b"\x05review".to_vec(),
+            signer_key_id: signer_key_id_hex,
+            payload: payload.to_vec(),
+            signature: signature.to_vec(),
+            kind: b"\x05review".to_vec(),
+            inputs: vec![],
+            affected_nodes: vec![],
+            signatures: vec![signature.clone()],
+        };
+
+        // Verify the valid signature
+        let result = verify_ed25519_signature(&pk, &att);
+        assert!(result.is_ok(), "valid signature should be accepted");
+
+        // Verify with a corrupted signature
+        let mut bad_sig = signature.clone();
+        bad_sig[0] ^= 0x01;
+        let att_bad = AttestationType {
+            signature: bad_sig,
+            ..att.clone()
+        };
+        let result = verify_ed25519_signature(&pk, &att_bad);
+        assert!(result.is_err(), "invalid signature should be rejected");
+
+        // Verify with a wrong message (different payload)
+        let other_payload = b"different payload";
+        let att_other = AttestationType {
+            payload: other_payload.to_vec(),
+            ..att.clone()
+        };
+        let result = verify_ed25519_signature(&pk, &att_other);
+        assert!(result.is_err(), "wrong message should be rejected");
     }
 }
